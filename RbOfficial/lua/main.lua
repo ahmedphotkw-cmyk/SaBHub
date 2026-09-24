@@ -1,20 +1,19 @@
-Enter--[[
+--[[
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                              ║
 ║      🥚  E G G   F I N D E R  ·  G O   E D I T I O N                          ║
 ║                                                                              ║
-║                       v10.3 — Go + Floating Go + Value Rank                   ║
+║                       v10.2 — Go Button + Floating Go                        ║
 ║                                                                              ║
-║   • Value parser (309K / 1.5M / 2.3B / $1,234K+)                             ║
-║   • Tier system by VALUE                                                     ║
-║   • Sort by value (keyword fallback)                                          ║
-║   • All v10.2 features intact + ROBUST RENDER                                 ║
+║   • New "انتقال" button per egg row                                          ║
+║   • New Floating Go button (goes to saved position)                          ║
+║   • All previous features intact                                             ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ]]
 
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-print("🥚 EGG FINDER v10.3 — GO + VALUE RANK")
+print("🥚 EGG FINDER v10.2 — GO EDITION")
 print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 local function safe_service(name)
@@ -69,7 +68,6 @@ local P = {
     EPIC        = Color3.fromRGB(180, 100, 220),
     LEGENDARY   = Color3.fromRGB(255, 180, 50),
     MYTHICAL    = Color3.fromRGB(255, 80, 120),
-    UNKNOWN     = Color3.fromRGB(90, 90, 90),
 }
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -84,15 +82,6 @@ local CFG = {
     RETURN_TIME     = 0.15,
     COLLECT_DELAY   = 0.25,
     AUTO_COLLECT_WAIT = 0.35,
-
-    VALUE_TIERS = {
-        { name = "MYTHICAL",  color = P.MYTHICAL,  min = 1e9 },
-        { name = "LEGENDARY", color = P.LEGENDARY, min = 1e8 },
-        { name = "EPIC",      color = P.EPIC,      min = 1e7 },
-        { name = "RARE",      color = P.RARE,      min = 1e6 },
-        { name = "UNCOMMON",  color = P.UNCOMMON,  min = 1e5 },
-        { name = "COMMON",    color = P.COMMON,    min = 0   },
-    },
 }
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -108,11 +97,10 @@ local STATE = {
     ui = nil,
     running = true,
     last_error = "لا يوجد",
-    egg_values = {},
 }
 
 -- ═════════════════════════════════════════════════════════════════════════════
---   RARITY (keyword fallback)
+--   RARITY
 -- ═════════════════════════════════════════════════════════════════════════════
 
 local RARITY_LIST = {
@@ -125,7 +113,6 @@ local RARITY_LIST = {
 }
 
 local function get_rarity(name)
-    if type(name) ~= "string" then return "COMMON", P.COMMON end
     local lower = name:lower()
     for _, r in ipairs(RARITY_LIST) do
         for _, kw in ipairs(r.kw) do
@@ -135,116 +122,6 @@ local function get_rarity(name)
         end
     end
     return "COMMON", P.COMMON
-end
-
--- ═════════════════════════════════════════════════════════════════════════════
---   VALUE PARSER
--- ═════════════════════════════════════════════════════════════════════════════
-
-local function parse_value_string(s)
-    if not s or type(s) ~= "string" then return nil end
-    local clean = s:gsub("[%$,%s%+%%]", "")
-    if clean == "" then return nil end
-    local num_str, suffix = clean:match("^(%d+%.?%d*)([KkMmBbTtGg]?)")
-    if not num_str then return nil end
-    local n = tonumber(num_str)
-    if not n or n <= 0 then return nil end
-    suffix = (suffix or ""):upper()
-    if     suffix == "K" then n = n * 1e3
-    elseif suffix == "M" then n = n * 1e6
-    elseif suffix == "B" then n = n * 1e9
-    elseif suffix == "T" then n = n * 1e12
-    elseif suffix == "G" then n = n * 1e9
-    end
-    return n
-end
-
-local VALUE_KEYWORDS = {
-    "value","worth","price","cost","score","money","coins","cash",
-    "قيمة","سعر","نقاط","قيمت"
-}
-
-local function name_has_kw(name)
-    if not name or type(name) ~= "string" then return false end
-    local nl = name:lower()
-    for _, kw in ipairs(VALUE_KEYWORDS) do
-        if nl:find(kw, 1, true) then return true end
-    end
-    return false
-end
-
-local function extract_value(egg)
-    if not egg then return nil end
-    local targets = { egg }
-    if egg.Parent then table.insert(targets, egg.Parent) end
-    for _, t in ipairs(targets) do
-        local ok, attrs = pcall(function() return t:GetAttributes() end)
-        if ok and attrs then
-            for k, v in pairs(attrs) do
-                if name_has_kw(k) then
-                    if type(v) == "number" and v > 0 then return v end
-                    if type(v) == "string" then
-                        local p = parse_value_string(v)
-                        if p then return p end
-                    end
-                end
-            end
-        end
-    end
-
-    local ok, descs = pcall(function() return egg:GetDescendants() end)
-    if ok and descs then
-        for _, d in ipairs(descs) do
-            if (d:IsA("NumberValue") or d:IsA("IntValue")) and name_has_kw(d.Name) then
-                if d.Value > 0 then return d.Value end
-            end
-            if d:IsA("StringValue") and name_has_kw(d.Name) then
-                local p = parse_value_string(d.Value)
-                if p then return p end
-            end
-        end
-    end
-
-    if ok and descs then
-        for _, d in ipairs(descs) do
-            if d:IsA("TextLabel") or d:IsA("TextButton") then
-                local par = d.Parent
-                if par and (par:IsA("BillboardGui") or par:IsA("SurfaceGui") or par:IsA("ScreenGui")) then
-                    local p = parse_value_string(d.Text)
-                    if p then return p end
-                end
-            end
-        end
-    end
-
-    return parse_value_string(egg.Name)
-end
-
-local function tier_of_value(value)
-    if not value then return "UNKNOWN", P.UNKNOWN end
-    for _, t in ipairs(CFG.VALUE_TIERS) do
-        if value >= t.min then return t.name, t.color end
-    end
-    return "COMMON", P.COMMON
-end
-
-local function fmt_value(v)
-    if not v then return "—" end
-    if v >= 1e12 then return string.format("%.2fT", v/1e12) end
-    if v >= 1e9  then return string.format("%.2fB", v/1e9)  end
-    if v >= 1e6  then return string.format("%.2fM", v/1e6)  end
-    if v >= 1e3  then return string.format("%.1fK", v/1e3)  end
-    return tostring(math.floor(v))
-end
-
-local function group_best_value(insts)
-    if not insts then return nil end
-    local best = nil
-    for _, inst in ipairs(insts) do
-        local v = STATE.egg_values[inst]
-        if v and (not best or v > best) then best = v end
-    end
-    return best
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -290,7 +167,7 @@ local function clean_name(name)
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
---   SCAN  (v10.2 + value extraction)
+--   SCAN
 -- ═════════════════════════════════════════════════════════════════════════════
 
 local function scan()
@@ -343,9 +220,6 @@ local function scan()
         end
     end
 
-    -- ⚡ reset value store
-    STATE.egg_values = {}
-
     for _, inst in ipairs(source_list) do
         local ok, name = pcall(function() return inst.Name end)
         if ok and name then
@@ -353,12 +227,6 @@ local function scan()
             if not groups[base] then groups[base] = {} end
             table.insert(groups[base], inst)
             total = total + 1
-
-            -- ✨ extract value safely — never let this kill scan
-            local ok_v, val = pcall(extract_value, inst)
-            if ok_v and val then
-                STATE.egg_values[inst] = val
-            end
         end
     end
 
@@ -478,6 +346,7 @@ local function save_position()
     return true
 end
 
+-- الانتقال للمكان المحفوظ
 local function go_to_saved(on_done)
     if not STATE.saved_position then
         if on_done then on_done(false) end
@@ -529,32 +398,26 @@ end
 
 local function gather_egg_intel(egg)
     local data = {
-        identity = {}, position = {}, physics = {}, appearance = {},
-        structure = {}, attributes = {}, interactions = {}, effects = {},
-        network = {}, tags = {}, value_info = {},
+        identity = {},
+        position = {},
+        physics = {},
+        appearance = {},
+        structure = {},
+        attributes = {},
+        interactions = {},
+        effects = {},
+        network = {},
+        tags = {},
     }
 
     data.identity["Name"] = egg.Name
     data.identity["ClassName"] = egg.ClassName
     data.identity["FullName"] = egg:GetFullName()
-    data.identity["Archivable"] = tostring(try_read(egg, "Archivable") or "—")
 
-    -- ✨ value info
-    local v = STATE.egg_values[egg]
-    if not v then
-        local ok_v, val = pcall(extract_value, egg)
-        if ok_v then v = val end
-    end
-    if v then
-        local tname = tier_of_value(v)
-        data.value_info["Raw Value"] = fmt_num(v, 0)
-        data.value_info["Display"] = fmt_value(v)
-        data.value_info["Tier"] = tname
-    else
-        data.value_info["Raw Value"] = "—"
-        data.value_info["Display"] = "—"
-        data.value_info["Tier"] = "UNKNOWN"
-    end
+    local ok_id, did = pcall(function() return egg:GetDebugId() end)
+    if ok_id and did then data.identity["DebugId"] = tostring(did) end
+
+    data.identity["Archivable"] = tostring(try_read(egg, "Archivable") or "—")
 
     local mp = get_main_part(egg)
     if mp then
@@ -616,15 +479,17 @@ local function gather_egg_intel(egg)
     end
 
     local attrs = egg:GetAttributes()
-    for k, v2 in pairs(attrs) do
-        data.attributes[k] = tostring(v2)
+    for k, v in pairs(attrs) do
+        data.attributes[k] = tostring(v)
     end
 
     local prompts = find_prompts_near(egg)
     data.interactions["Total Prompts"] = tostring(#prompts)
 
-    data.interactions["ProximityPrompt"] = tostring(count_children_by_class(egg, "ProximityPrompt"))
-    data.interactions["ClickDetector"] = tostring(count_children_by_class(egg, "ClickDetector"))
+    local prox_count = count_children_by_class(egg, "ProximityPrompt")
+    local click_count = count_children_by_class(egg, "ClickDetector")
+    data.interactions["ProximityPrompt"] = tostring(prox_count)
+    data.interactions["ClickDetector"] = tostring(click_count)
 
     if #prompts > 0 then
         local first = prompts[1]
@@ -747,12 +612,8 @@ end
 local UI = {}
 
 function UI.build()
-    print("[UI] build start")
     local parent = find_parent()
-    if not parent then
-        warn("[UI] no parent found")
-        return nil
-    end
+    if not parent then return nil end
 
     pcall(function()
         for _, c in ipairs(parent:GetChildren()) do
@@ -767,13 +628,13 @@ function UI.build()
         ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
         DisplayOrder = 999,
     }, parent)
-    if not screen then warn("[UI] ScreenGui failed"); return nil end
+    if not screen then return nil end
 
     if type(syn) == "table" and syn.protect_gui then
         pcall(function() syn.protect_gui(screen) end)
     end
 
-    -- FLOATING #1
+    -- ═══ FLOATING #1 — فتح الواجهة (🥚) ═══
     local floating = mk("TextButton", {
         Name = "FloatEgg",
         Size = UDim2.new(0, 75, 0, 75),
@@ -785,8 +646,6 @@ function UI.build()
         TextSize = 34,
         BorderSizePixel = 0,
         AutoButtonColor = false,
-        Active = true,
-        ZIndex = 10,
     }, screen)
     if floating then
         corner(floating, 40)
@@ -795,7 +654,7 @@ function UI.build()
         make_draggable(floating)
     end
 
-    -- FLOATING #2
+    -- ═══ FLOATING #2 — الانتقال للمكان المحفوظ (🎯) — جديد ═══
     local floatingGo = mk("TextButton", {
         Name = "FloatGo",
         Size = UDim2.new(0, 75, 0, 75),
@@ -807,8 +666,6 @@ function UI.build()
         TextSize = 32,
         BorderSizePixel = 0,
         AutoButtonColor = false,
-        Active = true,
-        ZIndex = 10,
     }, screen)
     if floatingGo then
         corner(floatingGo, 40)
@@ -837,7 +694,7 @@ function UI.build()
         end)
     end
 
-    -- MAIN
+    -- ═══ MAIN ═══
     local main = mk("Frame", {
         Name = "Main",
         Size = UDim2.new(0, 540, 0, 640),
@@ -847,9 +704,8 @@ function UI.build()
         Active = true,
         Visible = false,
         ClipsDescendants = true,
-        ZIndex = 5,
     }, screen)
-    if not main then warn("[UI] Main failed"); return nil end
+    if not main then return nil end
     corner(main, 16)
     gradient(main, P.BG_MAIN, P.BG_DARK, 90)
     stroke(main, P.GOLD, 2, 0.1)
@@ -865,7 +721,7 @@ function UI.build()
         end)
     end
 
-    -- HEADER
+    -- ═══ HEADER ═══
     local header = mk("Frame", {
         Name = "Header",
         Size = UDim2.new(1, 0, 0, 68),
@@ -908,7 +764,7 @@ function UI.build()
             Size = UDim2.new(1, -170, 0, 20),
             Position = UDim2.new(0, 68, 0, 38),
             BackgroundTransparency = 1,
-            Text = "GO · v10.3",
+            Text = "GO · v10.2",
             TextColor3 = P.TEXT_DIM,
             Font = Enum.Font.GothamBold,
             TextSize = 10,
@@ -954,7 +810,7 @@ function UI.build()
         end
     end
 
-    -- STATS
+    -- ═══ STATS ═══
     local stats = mk("Frame", {
         Name = "Stats",
         Size = UDim2.new(1, -20, 0, 50),
@@ -991,30 +847,6 @@ function UI.build()
             TextXAlignment = Enum.TextXAlignment.Left,
         }, stats)
 
-        mk("TextLabel", {
-            Name = "TopValue",
-            Size = UDim2.new(0.5, -20, 0, 25),
-            Position = UDim2.new(0.5, 0, 0, 5),
-            BackgroundTransparency = 1,
-            Text = "🏆 TOP: —",
-            TextColor3 = P.GOLD,
-            Font = Enum.Font.GothamBold,
-            TextSize = 14,
-            TextXAlignment = Enum.TextXAlignment.Right,
-        }, stats)
-
-        mk("TextLabel", {
-            Name = "ValueCount",
-            Size = UDim2.new(0.5, -20, 0, 25),
-            Position = UDim2.new(0.5, 0, 0, 24),
-            BackgroundTransparency = 1,
-            Text = "💰 0 RANKED",
-            TextColor3 = P.GREEN,
-            Font = Enum.Font.Gotham,
-            TextSize = 12,
-            TextXAlignment = Enum.TextXAlignment.Right,
-        }, stats)
-
         local dot = mk("Frame", {
             Size = UDim2.new(0, 12, 0, 12),
             Position = UDim2.new(1, -30, 0, 19),
@@ -1024,7 +856,7 @@ function UI.build()
         if dot then corner(dot, 6) end
     end
 
-    -- LOCATION PANEL
+    -- ═══ LOCATION PANEL ═══
     local locPanel = mk("Frame", {
         Name = "LocationPanel",
         Size = UDim2.new(1, -20, 0, 90),
@@ -1107,7 +939,7 @@ function UI.build()
         end
     end
 
-    -- SEARCH
+    -- ═══ SEARCH ═══
     local searchFrame = mk("Frame", {
         Size = UDim2.new(1, -20, 0, 42),
         Position = UDim2.new(0, 10, 0, 238),
@@ -1142,7 +974,7 @@ function UI.build()
         }, searchFrame)
     end
 
-    -- LIST
+    -- ═══ LIST ═══
     local list = mk("ScrollingFrame", {
         Name = "List",
         Size = UDim2.new(1, -20, 1, -330),
@@ -1165,7 +997,7 @@ function UI.build()
         }, list)
     end
 
-    -- INFO OVERLAY
+    -- ═══ INFO OVERLAY ═══
     local infoOverlay = mk("TextButton", {
         Name = "InfoOverlay",
         Size = UDim2.new(1, 0, 1, 0),
@@ -1179,7 +1011,7 @@ function UI.build()
         ZIndex = 18,
     }, screen)
 
-    -- INFO PANEL
+    -- ═══ INFO PANEL ═══
     local infoPanel = mk("Frame", {
         Name = "InfoPanel",
         Size = UDim2.new(0.92, 0, 0.88, 0),
@@ -1285,8 +1117,6 @@ function UI.build()
         mk("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder}, content)
     end
 
-    print("[UI] build complete")
-
     return {
         screen = screen,
         floating = floating,
@@ -1298,8 +1128,6 @@ function UI.build()
         refreshBtn = header and header:FindFirstChild("RefreshBtn") or nil,
         eggCount = stats and stats:FindFirstChild("EggCount") or nil,
         groupCount = stats and stats:FindFirstChild("GroupCount") or nil,
-        topValue = stats and stats:FindFirstChild("TopValue") or nil,
-        valueCount = stats and stats:FindFirstChild("ValueCount") or nil,
         debugLabel = header and header:FindFirstChild("DebugLabel") or nil,
         infoPanel = infoPanel,
         infoOverlay = infoOverlay,
@@ -1310,11 +1138,11 @@ function UI.build()
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
---   INFO PANEL RENDER
+--   INFO PANEL — RENDER
 -- ═════════════════════════════════════════════════════════════════════════════
 
 local order_counter = 0
-local function no() order_counter = order_counter + 1; return order_counter end
+local function no() order_counter = order_counter + 1 return order_counter end
 
 local function add_section(parent, title, emoji, color)
     local header = mk("Frame", {
@@ -1390,11 +1218,6 @@ local function show_egg_info(egg)
 
     local intel = gather_egg_intel(egg)
 
-    add_section(ui.infoContent, "القيمة والتصنيف", "🏆", P.GOLD)
-    for k, v in pairs(intel.value_info) do
-        add_row(ui.infoContent, k, v, P.GOLD)
-    end
-
     add_section(ui.infoContent, "الهوية", "🆔", P.GOLD)
     for k, v in pairs(intel.identity) do
         add_row(ui.infoContent, k, v, P.TEXT)
@@ -1460,17 +1283,14 @@ local function show_egg_info(egg)
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
---   RENDER (ROBUST — no continue, all wrapped)
+--   RENDER — القائمة الرئيسية
 -- ═════════════════════════════════════════════════════════════════════════════
 
 local ord = 0
-local function next_ord() ord = ord + 1; return ord end
+local function next_ord() ord = ord + 1 return ord end
 
 local function render(filter)
-    if not STATE.ui or not STATE.ui.list then
-        warn("[render] no list")
-        return
-    end
+    if not STATE.ui or not STATE.ui.list then return end
 
     for _, c in ipairs(STATE.ui.list:GetChildren()) do
         if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
@@ -1479,28 +1299,16 @@ local function render(filter)
     ord = 0
     filter = (filter or ""):lower()
 
-    -- collect matching group names
     local names = {}
     for n, _ in pairs(STATE.eggs) do
-        local ok, match = pcall(function() return n:lower():find(filter, 1, true) end)
-        if ok and match then table.insert(names, n) end
+        if filter == "" or n:lower():find(filter, 1, true) then
+            table.insert(names, n)
+        end
     end
 
-    -- sort: value desc → keyword rarity → count
     table.sort(names, function(a, b)
-        local va = group_best_value(STATE.eggs[a])
-        local vb = group_best_value(STATE.eggs[b])
-
-        if va and vb then
-            if va ~= vb then return va > vb end
-        elseif va and not vb then
-            return true
-        elseif vb and not va then
-            return false
-        end
-
-        local ra = select(1, get_rarity(a))
-        local rb = select(1, get_rarity(b))
+        local ra = get_rarity(a)
+        local rb = get_rarity(b)
         if ra ~= rb then
             local o = { MYTHICAL=1, LEGENDARY=2, EPIC=3, RARE=4, UNCOMMON=5, COMMON=6 }
             return (o[ra] or 99) < (o[rb] or 99)
@@ -1522,23 +1330,12 @@ local function render(filter)
         return
     end
 
-    local count = 0
     for _, name in ipairs(names) do
-        count = count + 1
         local eggs = STATE.eggs[name]
         local expanded = STATE.expanded[name] or false
-        local rar = select(1, get_rarity(name))
-        local rarColor = select(2, get_rarity(name))
+        local rar, rarColor = get_rarity(name)
 
-        -- value of the group (best of instances)
-        local gval = group_best_value(eggs)
-        local vTier = select(1, tier_of_value(gval))
-        local vColor = select(2, tier_of_value(gval))
-        local displayColor = gval and vColor or rarColor
-        local displayTier  = gval and vTier  or rar
-        local valueText    = gval and fmt_value(gval) or "—"
-
-        -- ROW
+        -- ROW (70px)
         local row = mk("TextButton", {
             Size = UDim2.new(1, 0, 0, 70),
             BackgroundColor3 = P.BG_ROW,
@@ -1547,192 +1344,164 @@ local function render(filter)
             AutoButtonColor = false,
             LayoutOrder = next_ord(),
         }, STATE.ui.list)
+        if not row then continue end
+        corner(row, 12)
+        gradient(row, P.BG_ROW, P.BG_SUB, 90)
+        stroke(row, rarColor, 1.5, 0.4)
 
-        if row then
-            corner(row, 12)
-            gradient(row, P.BG_ROW, P.BG_SUB, 90)
-            stroke(row, displayColor, 1.5, 0.4)
+        local rb = mk("Frame", {
+            Size = UDim2.new(0, 4, 0.7, 0),
+            Position = UDim2.new(0, 0, 0.15, 0),
+            BackgroundColor3 = rarColor,
+            BorderSizePixel = 0,
+        }, row)
+        if rb then corner(rb, 2) end
 
-            mk("Frame", {
-                Size = UDim2.new(0, 4, 0.7, 0),
-                Position = UDim2.new(0, 0, 0.15, 0),
-                BackgroundColor3 = displayColor,
-                BorderSizePixel = 0,
-            }, row)
-            local rb = row:FindFirstChildOfClass("Frame")
-            if rb then corner(rb, 2) end
+        local arrow = mk("TextButton", {
+            Size = UDim2.new(0, 42, 1, 0),
+            Position = UDim2.new(0, 8, 0, 0),
+            BackgroundTransparency = 1,
+            Text = expanded and "▼" or "▶",
+            TextColor3 = rarColor,
+            Font = Enum.Font.GothamBlack,
+            TextSize = 22,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+        }, row)
 
-            local arrow = mk("TextButton", {
-                Size = UDim2.new(0, 42, 1, 0),
-                Position = UDim2.new(0, 8, 0, 0),
-                BackgroundTransparency = 1,
-                Text = expanded and "▼" or "▶",
-                TextColor3 = displayColor,
-                Font = Enum.Font.GothamBlack,
-                TextSize = 22,
-                BorderSizePixel = 0,
-                AutoButtonColor = false,
-            }, row)
+        mk("TextLabel", {
+            Size = UDim2.new(0.35, 0, 0, 22),
+            Position = UDim2.new(0, 55, 0, 12),
+            BackgroundTransparency = 1,
+            Text = name,
+            TextColor3 = P.TEXT,
+            Font = Enum.Font.GothamBlack,
+            TextSize = 15,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, row)
 
+        local rt = mk("TextLabel", {
+            Size = UDim2.new(0, 90, 0, 18),
+            Position = UDim2.new(0, 55, 0, 40),
+            BackgroundColor3 = rarColor,
+            BackgroundTransparency = 0.85,
+            Text = "  " .. rar,
+            TextColor3 = rarColor,
+            Font = Enum.Font.GothamBold,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BorderSizePixel = 0,
+        }, row)
+        if rt then corner(rt, 4) end
+
+        local cf = mk("Frame", {
+            Size = UDim2.new(0, 45, 0, 30),
+            Position = UDim2.new(0.5, 0, 0, 20),
+            BackgroundColor3 = rarColor,
+            BackgroundTransparency = 0.75,
+            BorderSizePixel = 0,
+        }, row)
+        if cf then
+            corner(cf, 15)
             mk("TextLabel", {
-                Size = UDim2.new(0, 140, 0, 22),
-                Position = UDim2.new(0, 55, 0, 12),
+                Size = UDim2.new(1, 0, 1, 0),
                 BackgroundTransparency = 1,
-                Text = name,
-                TextColor3 = P.TEXT,
+                Text = "× " .. #eggs,
+                TextColor3 = rarColor,
                 Font = Enum.Font.GothamBlack,
-                TextSize = 15,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-            }, row)
+                TextSize = 13,
+            }, cf)
+        end
 
-            -- Tier chip (with count in text to save space)
-            local tierText = displayTier
-            if #eggs > 1 then tierText = tierText .. " ×" .. #eggs end
+        -- ℹ Info button
+        local infoBtn = mk("TextButton", {
+            Size = UDim2.new(0, 45, 0, 45),
+            Position = UDim2.new(1, -153, 0, 12),
+            BackgroundColor3 = P.PURPLE,
+            Text = "ℹ",
+            TextColor3 = Color3.fromRGB(255, 255, 255),
+            Font = Enum.Font.GothamBlack,
+            TextSize = 20,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+        }, row)
+        if infoBtn then
+            corner(infoBtn, 10)
+            gradient(infoBtn, P.PINK, P.PURPLE, 45)
+            infoBtn.MouseButton1Click:Connect(function()
+                if #eggs > 0 then show_egg_info(eggs[1]) end
+            end)
+        end
 
-            local rt = mk("TextLabel", {
-                Size = UDim2.new(0, 140, 0, 20),
-                Position = UDim2.new(0, 55, 0, 38),
-                BackgroundColor3 = displayColor,
-                BackgroundTransparency = 0.85,
-                Text = "  " .. tierText,
-                TextColor3 = displayColor,
-                Font = Enum.Font.GothamBold,
-                TextSize = 10,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                BorderSizePixel = 0,
-            }, row)
-            if rt then corner(rt, 4) end
-
-            -- Value box (in place of old count bubble)
-            local vBox = mk("Frame", {
-                Size = UDim2.new(0, 105, 0, 46),
-                Position = UDim2.new(0, 205, 0, 12),
-                BackgroundColor3 = displayColor,
-                BackgroundTransparency = 0.78,
-                BorderSizePixel = 0,
-            }, row)
-            if vBox then
-                corner(vBox, 8)
-                stroke(vBox, displayColor, 1, 0.5)
-
-                mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 14),
-                    Position = UDim2.new(0, 0, 0, 2),
-                    BackgroundTransparency = 1,
-                    Text = "VALUE",
-                    TextColor3 = P.TEXT_DIM,
-                    Font = Enum.Font.GothamBold,
-                    TextSize = 9,
-                }, vBox)
-
-                mk("TextLabel", {
-                    Size = UDim2.new(1, 0, 0, 22),
-                    Position = UDim2.new(0, 0, 0, 18),
-                    BackgroundTransparency = 1,
-                    Text = valueText,
-                    TextColor3 = displayColor,
-                    Font = Enum.Font.GothamBlack,
-                    TextSize = 15,
-                }, vBox)
-            end
-
-            -- ℹ Info button
-            local infoBtn = mk("TextButton", {
-                Size = UDim2.new(0, 45, 0, 45),
-                Position = UDim2.new(1, -153, 0, 12),
-                BackgroundColor3 = P.PURPLE,
-                Text = "ℹ",
-                TextColor3 = Color3.fromRGB(255, 255, 255),
-                Font = Enum.Font.GothamBlack,
-                TextSize = 20,
-                BorderSizePixel = 0,
-                AutoButtonColor = false,
-            }, row)
-            if infoBtn then
-                corner(infoBtn, 10)
-                gradient(infoBtn, P.PINK, P.PURPLE, 45)
-                infoBtn.MouseButton1Click:Connect(function()
-                    if #eggs > 0 then show_egg_info(eggs[1]) end
-                end)
-            end
-
-            -- ➡ Go
-            local goBtn = mk("TextButton", {
-                Size = UDim2.new(0, 45, 0, 45),
-                Position = UDim2.new(1, -103, 0, 12),
-                BackgroundColor3 = P.GREEN,
-                Text = "➡",
-                TextColor3 = Color3.fromRGB(255, 255, 255),
-                Font = Enum.Font.GothamBlack,
-                TextSize = 20,
-                BorderSizePixel = 0,
-                AutoButtonColor = false,
-            }, row)
-            if goBtn then
-                corner(goBtn, 10)
-                gradient(goBtn, P.CYAN, P.GREEN, 45)
-                stroke(goBtn, P.GREEN, 1.5, 0.3)
-                goBtn.MouseButton1Click:Connect(function()
-                    if #eggs > 0 then
-                        if fly_to(eggs[1]) then
-                            goBtn.Text = "✓"
-                            task.wait(0.5)
-                            goBtn.Text = "➡"
-                        else
-                            goBtn.Text = "✗"
-                            task.wait(0.5)
-                            goBtn.Text = "➡"
-                        end
+        -- ➡ Go button (NEW)
+        local goBtn = mk("TextButton", {
+            Size = UDim2.new(0, 45, 0, 45),
+            Position = UDim2.new(1, -103, 0, 12),
+            BackgroundColor3 = P.GREEN,
+            Text = "➡",
+            TextColor3 = Color3.fromRGB(255, 255, 255),
+            Font = Enum.Font.GothamBlack,
+            TextSize = 20,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+        }, row)
+        if goBtn then
+            corner(goBtn, 10)
+            gradient(goBtn, P.CYAN, P.GREEN, 45)
+            stroke(goBtn, P.GREEN, 1.5, 0.3)
+            goBtn.MouseButton1Click:Connect(function()
+                if #eggs > 0 then
+                    local ok = fly_to(eggs[1])
+                    if ok then
+                        goBtn.Text = "✓"
+                        task.wait(0.5)
+                        goBtn.Text = "➡"
+                    else
+                        goBtn.Text = "✗"
+                        task.wait(0.5)
+                        goBtn.Text = "➡"
                     end
-                end)
-            end
+                end
+            end)
+        end
 
-            -- 🚀 Auto
-            local autoBtn = mk("TextButton", {
-                Size = UDim2.new(0, 45, 0, 45),
-                Position = UDim2.new(1, -53, 0, 12),
-                BackgroundColor3 = P.CYAN,
-                Text = "🚀",
-                TextColor3 = Color3.fromRGB(0, 0, 0),
-                Font = Enum.Font.GothamBlack,
-                TextSize = 20,
-                BorderSizePixel = 0,
-                AutoButtonColor = false,
-            }, row)
-            if autoBtn then
-                corner(autoBtn, 10)
-                gradient(autoBtn, P.CYAN, P.BLUE, 45)
-                autoBtn.MouseButton1Click:Connect(function()
-                    if #eggs > 0 and not STATE.auto_collect_running then
-                        autoBtn.Text = "⏳"
-                        auto_collect(eggs[1], function(ok)
-                            autoBtn.Text = ok and "✓" or "✗"
-                            task.wait(0.8)
-                            autoBtn.Text = "🚀"
-                        end)
-                    end
-                end)
-            end
+        -- 🚀 Auto-Collect button
+        local autoBtn = mk("TextButton", {
+            Size = UDim2.new(0, 45, 0, 45),
+            Position = UDim2.new(1, -53, 0, 12),
+            BackgroundColor3 = P.CYAN,
+            Text = "🚀",
+            TextColor3 = Color3.fromRGB(0, 0, 0),
+            Font = Enum.Font.GothamBlack,
+            TextSize = 20,
+            BorderSizePixel = 0,
+            AutoButtonColor = false,
+        }, row)
+        if autoBtn then
+            corner(autoBtn, 10)
+            gradient(autoBtn, P.CYAN, P.BLUE, 45)
+            autoBtn.MouseButton1Click:Connect(function()
+                if #eggs > 0 and not STATE.auto_collect_running then
+                    autoBtn.Text = "⏳"
+                    auto_collect(eggs[1], function(ok)
+                        autoBtn.Text = ok and "✓" or "✗"
+                        task.wait(0.8)
+                        autoBtn.Text = "🚀"
+                    end)
+                end
+            end)
+        end
 
-            if arrow then
-                arrow.MouseButton1Click:Connect(function()
-                    STATE.expanded[name] = not STATE.expanded[name]
-                    if STATE.ui and STATE.ui.search then
-                        render(STATE.ui.search.Text)
-                    end
-                end)
-            end
+        if arrow then
+            arrow.MouseButton1Click:Connect(function()
+                STATE.expanded[name] = not expanded
+                render(STATE.ui.search and STATE.ui.search.Text or "")
+            end)
         end
 
         -- CHILDREN
-        if expanded and eggs then
+        if expanded then
             for i, egg in ipairs(eggs) do
-                local cval = STATE.egg_values[egg]
-                local ctier = select(1, tier_of_value(cval))
-                local ccolor = select(2, tier_of_value(cval))
-                local subColor = cval and ccolor or rarColor
-
                 local sub = mk("Frame", {
                     Size = UDim2.new(1, -30, 0, 60),
                     Position = UDim2.new(0, 25, 0, 0),
@@ -1740,94 +1509,87 @@ local function render(filter)
                     BorderSizePixel = 0,
                     LayoutOrder = next_ord(),
                 }, STATE.ui.list)
-                if sub then
-                    corner(sub, 10)
-                    stroke(sub, subColor, 1, 0.7)
+                if not sub then continue end
+                corner(sub, 10)
+                stroke(sub, rarColor, 1, 0.7)
 
-                    -- parent + value in one line
-                    local parentName = egg.Parent and egg.Parent.Name or "?"
-                    local subText = "#" .. i .. "  " .. parentName
-                    if cval then subText = subText .. "  ·  " .. fmt_value(cval) end
+                mk("TextLabel", {
+                    Size = UDim2.new(1, -180, 1, 0),
+                    Position = UDim2.new(0, 46, 0, 0),
+                    BackgroundTransparency = 1,
+                    Text = "#" .. i .. "  " .. (egg.Parent and egg.Parent.Name or "?"),
+                    TextColor3 = P.TEXT_DIM,
+                    Font = Enum.Font.Code,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                }, sub)
 
-                    mk("TextLabel", {
-                        Size = UDim2.new(1, -215, 1, 0),
-                        Position = UDim2.new(0, 46, 0, 0),
-                        BackgroundTransparency = 1,
-                        Text = subText,
-                        TextColor3 = cval and subColor or P.TEXT_DIM,
-                        Font = Enum.Font.Code,
-                        TextSize = 11,
-                        TextXAlignment = Enum.TextXAlignment.Left,
-                        TextTruncate = Enum.TextTruncate.AtEnd,
-                    }, sub)
+                -- ℹ Small
+                local si = mk("TextButton", {
+                    Size = UDim2.new(0, 42, 0, 42),
+                    Position = UDim2.new(1, -140, 0.5, -21),
+                    BackgroundColor3 = P.PURPLE,
+                    Text = "ℹ",
+                    TextColor3 = Color3.fromRGB(255, 255, 255),
+                    Font = Enum.Font.GothamBlack,
+                    TextSize = 18,
+                    BorderSizePixel = 0,
+                    AutoButtonColor = false,
+                }, sub)
+                if si then
+                    corner(si, 10)
+                    si.MouseButton1Click:Connect(function() show_egg_info(egg) end)
+                end
 
-                    -- ℹ
-                    local si = mk("TextButton", {
-                        Size = UDim2.new(0, 42, 0, 42),
-                        Position = UDim2.new(1, -140, 0.5, -21),
-                        BackgroundColor3 = P.PURPLE,
-                        Text = "ℹ",
-                        TextColor3 = Color3.fromRGB(255, 255, 255),
-                        Font = Enum.Font.GothamBlack,
-                        TextSize = 18,
-                        BorderSizePixel = 0,
-                        AutoButtonColor = false,
-                    }, sub)
-                    if si then
-                        corner(si, 10)
-                        si.MouseButton1Click:Connect(function() show_egg_info(egg) end)
-                    end
+                -- ➡ Go small
+                local sg = mk("TextButton", {
+                    Size = UDim2.new(0, 42, 0, 42),
+                    Position = UDim2.new(1, -92, 0.5, -21),
+                    BackgroundColor3 = P.GREEN,
+                    Text = "➡",
+                    TextColor3 = Color3.fromRGB(255, 255, 255),
+                    Font = Enum.Font.GothamBlack,
+                    TextSize = 18,
+                    BorderSizePixel = 0,
+                    AutoButtonColor = false,
+                }, sub)
+                if sg then
+                    corner(sg, 10)
+                    gradient(sg, P.CYAN, P.GREEN, 45)
+                    sg.MouseButton1Click:Connect(function()
+                        if fly_to(egg) then
+                            sg.Text = "✓"
+                            task.wait(0.5)
+                            sg.Text = "➡"
+                        end
+                    end)
+                end
 
-                    -- ➡
-                    local sg = mk("TextButton", {
-                        Size = UDim2.new(0, 42, 0, 42),
-                        Position = UDim2.new(1, -92, 0.5, -21),
-                        BackgroundColor3 = P.GREEN,
-                        Text = "➡",
-                        TextColor3 = Color3.fromRGB(255, 255, 255),
-                        Font = Enum.Font.GothamBlack,
-                        TextSize = 18,
-                        BorderSizePixel = 0,
-                        AutoButtonColor = false,
-                    }, sub)
-                    if sg then
-                        corner(sg, 10)
-                        gradient(sg, P.CYAN, P.GREEN, 45)
-                        sg.MouseButton1Click:Connect(function()
-                            if fly_to(egg) then
-                                sg.Text = "✓"
-                                task.wait(0.5)
-                                sg.Text = "➡"
-                            end
-                        end)
-                    end
-
-                    -- 🚀
-                    local sa = mk("TextButton", {
-                        Size = UDim2.new(0, 42, 0, 42),
-                        Position = UDim2.new(1, -42, 0.5, -21),
-                        BackgroundColor3 = P.CYAN,
-                        Text = "🚀",
-                        TextColor3 = Color3.fromRGB(0, 0, 0),
-                        Font = Enum.Font.GothamBlack,
-                        TextSize = 18,
-                        BorderSizePixel = 0,
-                        AutoButtonColor = false,
-                    }, sub)
-                    if sa then
-                        corner(sa, 10)
-                        gradient(sa, P.CYAN, P.BLUE, 45)
-                        sa.MouseButton1Click:Connect(function()
-                            if not STATE.auto_collect_running then
-                                sa.Text = "⏳"
-                                auto_collect(egg, function(ok)
-                                    sa.Text = ok and "✓" or "✗"
-                                    task.wait(0.8)
-                                    sa.Text = "🚀"
-                                end)
-                            end
-                        end)
-                    end
+                -- 🚀 Small
+                local sa = mk("TextButton", {
+                    Size = UDim2.new(0, 42, 0, 42),
+                    Position = UDim2.new(1, -42, 0.5, -21),
+                    BackgroundColor3 = P.CYAN,
+                    Text = "🚀",
+                    TextColor3 = Color3.fromRGB(0, 0, 0),
+                    Font = Enum.Font.GothamBlack,
+                    TextSize = 18,
+                    BorderSizePixel = 0,
+                    AutoButtonColor = false,
+                }, sub)
+                if sa then
+                    corner(sa, 10)
+                    gradient(sa, P.CYAN, P.BLUE, 45)
+                    sa.MouseButton1Click:Connect(function()
+                        if not STATE.auto_collect_running then
+                            sa.Text = "⏳"
+                            auto_collect(egg, function(ok)
+                                sa.Text = ok and "✓" or "✗"
+                                task.wait(0.8)
+                                sa.Text = "🚀"
+                            end)
+                        end
+                    end)
                 end
             end
         end
@@ -1842,37 +1604,20 @@ local function update_stats()
     if not STATE.ui then return end
     local names = 0
     for _ in pairs(STATE.eggs) do names = names + 1 end
-
-    local topValue = nil
-    local valueCount = 0
-    for _, v in pairs(STATE.egg_values) do
-        if v then
-            valueCount = valueCount + 1
-            if not topValue or v > topValue then topValue = v end
-        end
-    end
-
     if STATE.ui.eggCount then
         STATE.ui.eggCount.Text = "🥚 " .. STATE.total .. " EGGS"
     end
     if STATE.ui.groupCount then
         STATE.ui.groupCount.Text = "📊 " .. names .. " GROUPS"
     end
-    if STATE.ui.topValue then
-        STATE.ui.topValue.Text = topValue and ("🏆 TOP: " .. fmt_value(topValue)) or "🏆 TOP: —"
-    end
-    if STATE.ui.valueCount then
-        STATE.ui.valueCount.Text = "💰 " .. valueCount .. " RANKED"
-    end
     if STATE.ui.debugLabel then
         STATE.ui.debugLabel.Text = STATE.total > 0
-            and ("✅ " .. STATE.total .. " · GO+VALUE v10.3")
+            and ("✅ " .. STATE.total .. " · GO v10.2")
             or ("⚠ " .. STATE.last_error)
     end
 end
 
 local function refresh_all()
-    print("[refresh] scan start")
     local groups, total = scan()
     STATE.eggs = groups
     STATE.total = total
@@ -1883,7 +1628,6 @@ local function refresh_all()
     if STATE.ui and STATE.ui.search then
         render(STATE.ui.search.Text)
     end
-    print("[refresh] done", total)
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -1891,22 +1635,16 @@ end
 -- ═════════════════════════════════════════════════════════════════════════════
 
 local function main()
-    print("[main] start")
     STATE.ui = UI.build()
     if not STATE.ui then warn("[MAIN] ❌ UI failed"); return end
-    print("[main] UI ready")
 
     if STATE.ui.refreshBtn then
-        STATE.ui.refreshBtn.MouseButton1Click:Connect(function()
-            pcall(refresh_all)
-        end)
+        STATE.ui.refreshBtn.MouseButton1Click:Connect(refresh_all)
     end
 
     if STATE.ui.search then
         STATE.ui.search:GetPropertyChangedSignal("Text"):Connect(function()
-            if STATE.ui and STATE.ui.search then
-                pcall(render, STATE.ui.search.Text)
-            end
+            render(STATE.ui.search.Text)
         end)
     end
 
@@ -1937,20 +1675,17 @@ local function main()
         end
     end)
 
-    -- initial refresh (safe)
-    local ok, err = pcall(refresh_all)
-    if not ok then warn("[main] refresh error:", err) end
+    refresh_all()
 
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("👑 EGG FINDER v10.3 — GO + VALUE RANK READY")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("👑 EGG FINDER v10.2 — GO EDITION READY")
     print("   🥚 = فتح/إغلاق الواجهة")
     print("   🎯 = الانتقال للمكان المحفوظ")
-    print("   ℹ  = معلومات تفصيلية (+ القيمة)")
+    print("   ℹ  = معلومات تفصيلية")
     print("   ➡  = الانتقال إلى البيضة")
     print("   🚀 = طيران + ضغط + عودة تلقائية")
     print("   F1 = إخفاء · F2 = إغلاق المعلومات · F3 = العودة السريعة")
-    print("   💰 الترتيب حسب القيمة تلقائياً")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 end
 
 task.spawn(function()
