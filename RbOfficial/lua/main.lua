@@ -4,9 +4,11 @@
 ║      🥚  E G G   F I N D E R  ·  G O   E D I T I O N                          ║
 ║                                                                              ║
 ║                       v10.2 — Go Button + Floating Go                        ║
+║                       + VALUE RANK PATCH                                    ║
 ║                                                                              ║
 ║   • New "انتقال" button per egg row                                          ║
 ║   • New Floating Go button (goes to saved position)                          ║
+║   • + VALUE parser + tier system + value-sorted list                         ║
 ║   • All previous features intact                                             ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -68,6 +70,7 @@ local P = {
     EPIC        = Color3.fromRGB(180, 100, 220),
     LEGENDARY   = Color3.fromRGB(255, 180, 50),
     MYTHICAL    = Color3.fromRGB(255, 80, 120),
+    UNKNOWN     = Color3.fromRGB(90, 90, 90),
 }
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -82,6 +85,16 @@ local CFG = {
     RETURN_TIME     = 0.15,
     COLLECT_DELAY   = 0.25,
     AUTO_COLLECT_WAIT = 0.35,
+
+    -- ✨ إضافة جديدة: عتبات التيرات حسب القيمة (عدّلها كما تريد)
+    VALUE_TIERS = {
+        { name = "MYTHICAL",  color = P.MYTHICAL,  min = 1e9 },
+        { name = "LEGENDARY", color = P.LEGENDARY, min = 1e8 },
+        { name = "EPIC",      color = P.EPIC,      min = 1e7 },
+        { name = "RARE",      color = P.RARE,      min = 1e6 },
+        { name = "UNCOMMON",  color = P.UNCOMMON,  min = 1e5 },
+        { name = "COMMON",    color = P.COMMON,    min = 0   },
+    },
 }
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -97,6 +110,7 @@ local STATE = {
     ui = nil,
     running = true,
     last_error = "لا يوجد",
+    egg_values = {},   -- ✨ إضافة جديدة
 }
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -122,6 +136,123 @@ local function get_rarity(name)
         end
     end
     return "COMMON", P.COMMON
+end
+
+-- ═════════════════════════════════════════════════════════════════════════════
+--   VALUE PARSER  ✨ (إضافة جديدة كاملة)
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- "309K" → 309000 | "1.5M" → 1500000 | "$1,234K+" → 1234000
+local function parse_value_string(s)
+    if not s or type(s) ~= "string" then return nil end
+    local clean = s:gsub("[%$,%s%+%%]", "")
+    if clean == "" then return nil end
+    local num_str, suffix = clean:match("^(%d+%.?%d*)([KkMmBbTtGg]?)")
+    if not num_str then return nil end
+    local n = tonumber(num_str)
+    if not n or n <= 0 then return nil end
+    suffix = (suffix or ""):upper()
+    if     suffix == "K" then n = n * 1e3
+    elseif suffix == "M" then n = n * 1e6
+    elseif suffix == "B" then n = n * 1e9
+    elseif suffix == "T" then n = n * 1e12
+    elseif suffix == "G" then n = n * 1e9
+    end
+    return n
+end
+
+local VALUE_KEYWORDS = {
+    "value","worth","price","cost","score","money","coins","cash",
+    "قيمة","سعر","نقاط","قيمت"
+}
+
+local function name_has_kw(name)
+    if not name or type(name) ~= "string" then return false end
+    local nl = name:lower()
+    for _, kw in ipairs(VALUE_KEYWORDS) do
+        if nl:find(kw, 1, true) then return true end
+    end
+    return false
+end
+
+-- استخراج القيمة بأربع طبقات
+local function extract_value(egg)
+    if not egg then return nil end
+
+    -- 1) Attributes على البيضة + الأب
+    local targets = { egg }
+    if egg.Parent then table.insert(targets, egg.Parent) end
+    for _, t in ipairs(targets) do
+        local ok, attrs = pcall(function() return t:GetAttributes() end)
+        if ok and attrs then
+            for k, v in pairs(attrs) do
+                if name_has_kw(k) then
+                    if type(v) == "number" and v > 0 then return v end
+                    if type(v) == "string" then
+                        local p = parse_value_string(v)
+                        if p then return p end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2) NumberValue / IntValue / StringValue بالاسم
+    local ok, descs = pcall(function() return egg:GetDescendants() end)
+    if ok and descs then
+        for _, d in ipairs(descs) do
+            if (d:IsA("NumberValue") or d:IsA("IntValue")) and name_has_kw(d.Name) then
+                if d.Value > 0 then return d.Value end
+            end
+            if d:IsA("StringValue") and name_has_kw(d.Name) then
+                local p = parse_value_string(d.Value)
+                if p then return p end
+            end
+        end
+    end
+
+    -- 3) BillboardGui / SurfaceGui TextLabels
+    if ok and descs then
+        for _, d in ipairs(descs) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                local par = d.Parent
+                if par and (par:IsA("BillboardGui") or par:IsA("SurfaceGui") or par:IsA("ScreenGui")) then
+                    local p = parse_value_string(d.Text)
+                    if p then return p end
+                end
+            end
+        end
+    end
+
+    -- 4) من الاسم نفسه
+    return parse_value_string(egg.Name)
+end
+
+local function tier_of_value(value)
+    if not value then return "UNKNOWN", P.UNKNOWN end
+    for _, t in ipairs(CFG.VALUE_TIERS) do
+        if value >= t.min then return t.name, t.color end
+    end
+    return "COMMON", P.COMMON
+end
+
+local function fmt_value(v)
+    if not v then return "—" end
+    if v >= 1e12 then return string.format("%.2fT", v/1e12) end
+    if v >= 1e9  then return string.format("%.2fB", v/1e9)  end
+    if v >= 1e6  then return string.format("%.2fM", v/1e6)  end
+    if v >= 1e3  then return string.format("%.1fK", v/1e3)  end
+    return tostring(math.floor(v))
+end
+
+local function group_best_value(insts)
+    if not insts then return nil end
+    local best = nil
+    for _, inst in ipairs(insts) do
+        local v = STATE.egg_values[inst]
+        if v and (not best or v > best) then best = v end
+    end
+    return best
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -220,6 +351,9 @@ local function scan()
         end
     end
 
+    -- ✨ إضافة جديدة: تصفير مخزن القيم
+    STATE.egg_values = {}
+
     for _, inst in ipairs(source_list) do
         local ok, name = pcall(function() return inst.Name end)
         if ok and name then
@@ -227,6 +361,12 @@ local function scan()
             if not groups[base] then groups[base] = {} end
             table.insert(groups[base], inst)
             total = total + 1
+
+            -- ✨ إضافة جديدة: استخراج القيمة (محمي بـ pcall)
+            local ok_v, val = pcall(extract_value, inst)
+            if ok_v and val then
+                STATE.egg_values[inst] = val
+            end
         end
     end
 
@@ -408,6 +548,7 @@ local function gather_egg_intel(egg)
         effects = {},
         network = {},
         tags = {},
+        value_info = {},   -- ✨ إضافة جديدة
     }
 
     data.identity["Name"] = egg.Name
@@ -418,6 +559,23 @@ local function gather_egg_intel(egg)
     if ok_id and did then data.identity["DebugId"] = tostring(did) end
 
     data.identity["Archivable"] = tostring(try_read(egg, "Archivable") or "—")
+
+    -- ✨ إضافة جديدة: قيمة البيضة
+    local v = STATE.egg_values[egg]
+    if not v then
+        local ok_v, val = pcall(extract_value, egg)
+        if ok_v then v = val end
+    end
+    if v then
+        local tname = tier_of_value(v)
+        data.value_info["Raw Value"] = fmt_num(v, 0)
+        data.value_info["Display"] = fmt_value(v)
+        data.value_info["Tier"] = tname
+    else
+        data.value_info["Raw Value"] = "—"
+        data.value_info["Display"] = "—"
+        data.value_info["Tier"] = "UNKNOWN"
+    end
 
     local mp = get_main_part(egg)
     if mp then
@@ -479,8 +637,8 @@ local function gather_egg_intel(egg)
     end
 
     local attrs = egg:GetAttributes()
-    for k, v in pairs(attrs) do
-        data.attributes[k] = tostring(v)
+    for k, v2 in pairs(attrs) do
+        data.attributes[k] = tostring(v2)
     end
 
     local prompts = find_prompts_near(egg)
@@ -654,7 +812,7 @@ function UI.build()
         make_draggable(floating)
     end
 
-    -- ═══ FLOATING #2 — الانتقال للمكان المحفوظ (🎯) — جديد ═══
+    -- ═══ FLOATING #2 — الانتقال للمكان المحفوظ (🎯) ═══
     local floatingGo = mk("TextButton", {
         Name = "FloatGo",
         Size = UDim2.new(0, 75, 0, 75),
@@ -845,6 +1003,32 @@ function UI.build()
             Font = Enum.Font.Gotham,
             TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left,
+        }, stats)
+
+        -- ✨ إضافة جديدة: عرض أعلى قيمة
+        mk("TextLabel", {
+            Name = "TopValue",
+            Size = UDim2.new(0.5, -50, 0, 25),
+            Position = UDim2.new(0.5, 0, 0, 5),
+            BackgroundTransparency = 1,
+            Text = "🏆 TOP: —",
+            TextColor3 = P.GOLD,
+            Font = Enum.Font.GothamBold,
+            TextSize = 14,
+            TextXAlignment = Enum.TextXAlignment.Right,
+        }, stats)
+
+        -- ✨ إضافة جديدة: عدد البيضات ذات القيمة
+        mk("TextLabel", {
+            Name = "ValueCount",
+            Size = UDim2.new(0.5, -50, 0, 25),
+            Position = UDim2.new(0.5, 0, 0, 24),
+            BackgroundTransparency = 1,
+            Text = "💰 0 RANKED",
+            TextColor3 = P.GREEN,
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Right,
         }, stats)
 
         local dot = mk("Frame", {
@@ -1128,6 +1312,9 @@ function UI.build()
         refreshBtn = header and header:FindFirstChild("RefreshBtn") or nil,
         eggCount = stats and stats:FindFirstChild("EggCount") or nil,
         groupCount = stats and stats:FindFirstChild("GroupCount") or nil,
+        -- ✨ إضافة جديدة
+        topValue = stats and stats:FindFirstChild("TopValue") or nil,
+        valueCount = stats and stats:FindFirstChild("ValueCount") or nil,
         debugLabel = header and header:FindFirstChild("DebugLabel") or nil,
         infoPanel = infoPanel,
         infoOverlay = infoOverlay,
@@ -1218,6 +1405,12 @@ local function show_egg_info(egg)
 
     local intel = gather_egg_intel(egg)
 
+    -- ✨ إضافة جديدة: قسم القيمة أولاً
+    add_section(ui.infoContent, "القيمة والتصنيف", "🏆", P.GOLD)
+    for k, v in pairs(intel.value_info) do
+        add_row(ui.infoContent, k, v, P.GOLD)
+    end
+
     add_section(ui.infoContent, "الهوية", "🆔", P.GOLD)
     for k, v in pairs(intel.identity) do
         add_row(ui.infoContent, k, v, P.TEXT)
@@ -1306,7 +1499,19 @@ local function render(filter)
         end
     end
 
+    -- ✨ إضافة جديدة: ترتيب حسب القيمة أولاً، ثم الكلمة المفتاحية
     table.sort(names, function(a, b)
+        local va = group_best_value(STATE.eggs[a])
+        local vb = group_best_value(STATE.eggs[b])
+
+        if va and vb then
+            if va ~= vb then return va > vb end
+        elseif va and not vb then
+            return true
+        elseif vb and not va then
+            return false
+        end
+
         local ra = get_rarity(a)
         local rb = get_rarity(b)
         if ra ~= rb then
@@ -1335,6 +1540,13 @@ local function render(filter)
         local expanded = STATE.expanded[name] or false
         local rar, rarColor = get_rarity(name)
 
+        -- ✨ إضافة جديدة: قيمة المجموعة + ألوانها الديناميكية
+        local gval = group_best_value(eggs)
+        local vTier, vColor = tier_of_value(gval)
+        local displayColor = gval and vColor or rarColor
+        local displayTier  = gval and vTier  or rar
+        local valueText    = gval and fmt_value(gval) or "—"
+
         -- ROW (70px)
         local row = mk("TextButton", {
             Size = UDim2.new(1, 0, 0, 70),
@@ -1347,12 +1559,12 @@ local function render(filter)
         if not row then continue end
         corner(row, 12)
         gradient(row, P.BG_ROW, P.BG_SUB, 90)
-        stroke(row, rarColor, 1.5, 0.4)
+        stroke(row, displayColor, 1.5, 0.4)
 
         local rb = mk("Frame", {
             Size = UDim2.new(0, 4, 0.7, 0),
             Position = UDim2.new(0, 0, 0.15, 0),
-            BackgroundColor3 = rarColor,
+            BackgroundColor3 = displayColor,
             BorderSizePixel = 0,
         }, row)
         if rb then corner(rb, 2) end
@@ -1362,7 +1574,7 @@ local function render(filter)
             Position = UDim2.new(0, 8, 0, 0),
             BackgroundTransparency = 1,
             Text = expanded and "▼" or "▶",
-            TextColor3 = rarColor,
+            TextColor3 = displayColor,
             Font = Enum.Font.GothamBlack,
             TextSize = 22,
             BorderSizePixel = 0,
@@ -1380,13 +1592,14 @@ local function render(filter)
             TextXAlignment = Enum.TextXAlignment.Left,
         }, row)
 
+        -- ✨ إضافة جديدة: شريحة التير (من القيمة إن وجدت)
         local rt = mk("TextLabel", {
             Size = UDim2.new(0, 90, 0, 18),
             Position = UDim2.new(0, 55, 0, 40),
-            BackgroundColor3 = rarColor,
+            BackgroundColor3 = displayColor,
             BackgroundTransparency = 0.85,
-            Text = "  " .. rar,
-            TextColor3 = rarColor,
+            Text = "  " .. displayTier,
+            TextColor3 = displayColor,
             Font = Enum.Font.GothamBold,
             TextSize = 10,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -1394,10 +1607,30 @@ local function render(filter)
         }, row)
         if rt then corner(rt, 4) end
 
+        -- ✨ إضافة جديدة: شريحة القيمة بين tier chip و count bubble
+        if gval then
+            local vb = mk("TextLabel", {
+                Size = UDim2.new(0, 105, 0, 18),
+                Position = UDim2.new(0, 150, 0, 40),
+                BackgroundColor3 = displayColor,
+                BackgroundTransparency = 0.7,
+                Text = "💰 " .. valueText,
+                TextColor3 = displayColor,
+                Font = Enum.Font.GothamBlack,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Center,
+                BorderSizePixel = 0,
+            }, row)
+            if vb then
+                corner(vb, 4)
+                stroke(vb, displayColor, 1, 0.5)
+            end
+        end
+
         local cf = mk("Frame", {
             Size = UDim2.new(0, 45, 0, 30),
             Position = UDim2.new(0.5, 0, 0, 20),
-            BackgroundColor3 = rarColor,
+            BackgroundColor3 = displayColor,
             BackgroundTransparency = 0.75,
             BorderSizePixel = 0,
         }, row)
@@ -1407,7 +1640,7 @@ local function render(filter)
                 Size = UDim2.new(1, 0, 1, 0),
                 BackgroundTransparency = 1,
                 Text = "× " .. #eggs,
-                TextColor3 = rarColor,
+                TextColor3 = displayColor,
                 Font = Enum.Font.GothamBlack,
                 TextSize = 13,
             }, cf)
@@ -1433,7 +1666,7 @@ local function render(filter)
             end)
         end
 
-        -- ➡ Go button (NEW)
+        -- ➡ Go button
         local goBtn = mk("TextButton", {
             Size = UDim2.new(0, 45, 0, 45),
             Position = UDim2.new(1, -103, 0, 12),
@@ -1502,6 +1735,11 @@ local function render(filter)
         -- CHILDREN
         if expanded then
             for i, egg in ipairs(eggs) do
+                -- ✨ إضافة جديدة: قيمة البيضة الفرعية
+                local cval = STATE.egg_values[egg]
+                local cTier, cColor = tier_of_value(cval)
+                local subColor = cval and cColor or rarColor
+
                 local sub = mk("Frame", {
                     Size = UDim2.new(1, -30, 0, 60),
                     Position = UDim2.new(0, 25, 0, 0),
@@ -1511,14 +1749,21 @@ local function render(filter)
                 }, STATE.ui.list)
                 if not sub then continue end
                 corner(sub, 10)
-                stroke(sub, rarColor, 1, 0.7)
+                stroke(sub, subColor, 1, 0.7)
+
+                -- ✨ إضافة جديدة: دمج القيمة في نص الصف الفرعي
+                local parentName = egg.Parent and egg.Parent.Name or "?"
+                local subText = "#" .. i .. "  " .. parentName
+                if cval then
+                    subText = subText .. "   ·   💰 " .. fmt_value(cval) .. " (" .. cTier .. ")"
+                end
 
                 mk("TextLabel", {
                     Size = UDim2.new(1, -180, 1, 0),
                     Position = UDim2.new(0, 46, 0, 0),
                     BackgroundTransparency = 1,
-                    Text = "#" .. i .. "  " .. (egg.Parent and egg.Parent.Name or "?"),
-                    TextColor3 = P.TEXT_DIM,
+                    Text = subText,
+                    TextColor3 = cval and subColor or P.TEXT_DIM,
                     Font = Enum.Font.Code,
                     TextSize = 11,
                     TextXAlignment = Enum.TextXAlignment.Left,
@@ -1610,9 +1855,26 @@ local function update_stats()
     if STATE.ui.groupCount then
         STATE.ui.groupCount.Text = "📊 " .. names .. " GROUPS"
     end
+
+    -- ✨ إضافة جديدة: حساب TOP و RANKED
+    local topValue = nil
+    local valueCount = 0
+    for _, v in pairs(STATE.egg_values) do
+        if v then
+            valueCount = valueCount + 1
+            if not topValue or v > topValue then topValue = v end
+        end
+    end
+    if STATE.ui.topValue then
+        STATE.ui.topValue.Text = topValue and ("🏆 TOP: " .. fmt_value(topValue)) or "🏆 TOP: —"
+    end
+    if STATE.ui.valueCount then
+        STATE.ui.valueCount.Text = "💰 " .. valueCount .. " RANKED"
+    end
+
     if STATE.ui.debugLabel then
         STATE.ui.debugLabel.Text = STATE.total > 0
-            and ("✅ " .. STATE.total .. " · GO v10.2")
+            and ("✅ " .. STATE.total .. " · GO v10.2 + VALUE")
             or ("⚠ " .. STATE.last_error)
     end
 end
@@ -1685,6 +1947,7 @@ local function main()
     print("   ➡  = الانتقال إلى البيضة")
     print("   🚀 = طيران + ضغط + عودة تلقائية")
     print("   F1 = إخفاء · F2 = إغلاق المعلومات · F3 = العودة السريعة")
+    print("   💰 = ترتيب حسب القيمة (جديد)")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 end
 
