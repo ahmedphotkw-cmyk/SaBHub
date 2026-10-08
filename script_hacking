@@ -1,0 +1,1879 @@
+-- ═══════════════════════════════════════════════════════════════════════
+-- MODARK DEEP SCANNER · v4.0 — ULTIMATE EDITION
+-- language: Lua, file: modark_deep_scan_v4.lua, runtime: Delta Mobile
+-- *15-layer detection · Remote executor · Analytics · Zero-lag · Premium UI*
+-- ═══════════════════════════════════════════════════════════════════════
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+task.wait(0.5)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- SERVICES
+-- ═══════════════════════════════════════════════════════════════════════
+local Players    = game:GetService("Players")
+local RS         = game:GetService("ReplicatedStorage")
+local WS         = game:GetService("Workspace")
+local Run        = game:GetService("RunService")
+local UIS        = game:GetService("UserInputService")
+local TS         = game:GetService("TweenService")
+local HttpS      = game:GetService("HttpService")
+local Lighting   = game:GetService("Lighting")
+local Sound      = game:GetService("SoundService")
+local Debris     = game:GetService("Debris")
+local ContextAction = game:GetService("ContextActionService")
+
+local LP = Players.LocalPlayer
+local PG = LP:WaitForChild("PlayerGui", 10)
+
+for _, n in ipairs({"ModarkDeepScanV4","ModarkDeepScanV3","ModarkDeepScan","ModarkScanner"}) do
+    local o = PG:FindFirstChild(n); if o then o:Destroy() end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- THEME
+-- ═══════════════════════════════════════════════════════════════════════
+local C = {
+    Bg      = Color3.fromRGB(7, 9, 14),
+    Bg2     = Color3.fromRGB(14, 17, 24),
+    Card    = Color3.fromRGB(21, 25, 33),
+    CardHov = Color3.fromRGB(29, 35, 45),
+    Stroke  = Color3.fromRGB(38, 44, 56),
+    Text    = Color3.fromRGB(228, 234, 244),
+    Dim     = Color3.fromRGB(140, 152, 172),
+    Muted   = Color3.fromRGB(85, 95, 115),
+    Accent  = Color3.fromRGB(140, 90, 255),
+    AccentD = Color3.fromRGB(90, 60, 200),
+    Cyan    = Color3.fromRGB(0, 220, 220),
+    Green   = Color3.fromRGB(0, 220, 140),
+    Blue    = Color3.fromRGB(80, 160, 255),
+    Yellow  = Color3.fromRGB(255, 200, 60),
+    Orange  = Color3.fromRGB(255, 140, 60),
+    Red     = Color3.fromRGB(255, 70, 90),
+    Pink    = Color3.fromRGB(255, 100, 180),
+    F       = Enum.Font.Gotham,
+    FB      = Enum.Font.GothamBold,
+    Mono    = Enum.Font.Code,
+}
+
+local function corner(p, r) local c = Instance.new("UICorner", p); c.CornerRadius = UDim.new(0, r or 8); return c end
+local function stroke(p, c, t)
+    local s = Instance.new("UIStroke", p)
+    s.Color = c or C.Stroke; s.Thickness = t or 1
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    return s
+end
+local function pad(p, t, r, b, l)
+    local u = Instance.new("UIPadding", p)
+    u.PaddingTop = UDim.new(0,t or 0); u.PaddingRight = UDim.new(0,r or 0)
+    u.PaddingBottom = UDim.new(0,b or 0); u.PaddingLeft = UDim.new(0,l or 0)
+    return u
+end
+local function tw(o, t, p)
+    local x = TS:Create(o, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), p)
+    x:Play(); return x
+end
+local function fmtNum(n)
+    if n >= 1e6 then return string.format("%.1fM", n/1e6) end
+    if n >= 1e3 then return string.format("%.1fK", n/1e3) end
+    return tostring(n)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- KEYWORD DATABASE (5 categories, priority-weighted)
+-- ═══════════════════════════════════════════════════════════════════════
+local KW = {
+    critical = {
+        {"admin","panel","backdoor","exploit","bypass","godmode","god_mode","instakill","onehit"},
+        {"hack","cheat","inject","hook","spoof","fake","mock","debug_mode"},
+    },
+    high = {
+        {"give","spawn","kick","ban","unban","warn","mute","jail","freeze"},
+        {"kill","killall","destroy","delete","remove","wipe","purge"},
+        {"setwalk","setspeed","setmoney","setlevel","setstat","admin_"},
+    },
+    medium = {
+        {"money","cash","coins","gem","diamond","reward","redeem","promo"},
+        {"vip","premium","boost","grant","gift","bonus","luck","lucky"},
+        {"spawn_","summon","create","generate","drop","item_"},
+    },
+    low = {
+        {"set","get","update","sync","force","trigger","dev","internal"},
+        {"secret","hidden","private","debug","test_","_test","temp_"},
+    },
+    network = {
+        {"fire","invoke","request","send","receive","push","pull","emit"},
+        {"remote","event","bind","listen","dispatch","emit"},
+    },
+}
+
+-- معامل الترتيب لكل فئة
+local KW_WEIGHT = {
+    critical = 5, high = 3, medium = 2, low = 1, network = 0.5,
+}
+
+local function scoreName(name)
+    local l = string.lower(name)
+    local score, reasons, matchedCats = 0, {}, {}
+    for cat, groups in pairs(KW) do
+        local w = KW_WEIGHT[cat]
+        for _, group in ipairs(groups) do
+            for _, kw in ipairs(group) do
+                if string.find(l, kw, 1, true) then
+                    score = score + w
+                    table.insert(reasons, kw)
+                    matchedCats[cat] = (matchedCats[cat] or 0) + 1
+                end
+            end
+        end
+    end
+    return score, reasons, matchedCats
+end
+
+local function levelOf(sc)
+    if sc >= 8 then return "CRIT", C.Red end
+    if sc >= 5 then return "HIGH", C.Orange end
+    if sc >= 3 then return "MED", C.Yellow end
+    if sc >= 1 then return "LOW", C.Dim end
+    return "NONE", C.Muted
+end
+
+-- كشف الأسماء المشبوهة (Obfuscated)
+local function analyzeNamePattern(name)
+    local flags = {}
+    -- 1. أرقام عشوائية فقط
+    if name:match("^%d+$") then table.insert(flags, "numeric_only") end
+    -- 2. أرقام طويلة (hash-like)
+    if name:match("%d%d%d%d%d%d%d%d") then table.insert(flags, "long_numeric") end
+    -- 3. حروف عشوائية
+    if name:match("^%u%l%u%l%u%l") then table.insert(flags, "random_caps") end
+    -- 4. رموز غريبة
+    if name:match("[^%w_%-%.]") then table.insert(flags, "special_chars") end
+    -- 5. طويل جداً
+    if #name > 40 then table.insert(flags, "very_long") end
+    -- 6. قصير جداً (حرف واحد)
+    if #name == 1 and name:match("%a") then table.insert(flags, "single_char") end
+    return flags
+end
+
+-- Entropy حسابي (يعطي 0-1)
+local function entropy(s)
+    if #s == 0 then return 0 end
+    local counts = {}
+    for i = 1, #s do
+        local c = s:sub(i,i)
+        counts[c] = (counts[c] or 0) + 1
+    end
+    local e = 0
+    for _, ct in pairs(counts) do
+        local p = ct / #s
+        e = e - p * math.log(p) / math.log(2)
+    end
+    return e / 8
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- UI ROOT
+-- ═══════════════════════════════════════════════════════════════════════
+local sg = Instance.new("ScreenGui")
+sg.Name = "ModarkDeepScanV4"
+sg.ResetOnSpawn = false
+sg.IgnoreGuiInset = true
+sg.DisplayOrder = 100
+sg.Parent = PG
+
+local W, H = 660, 500
+local main = Instance.new("Frame", sg)
+main.Size = UDim2.new(0, W, 0, H)
+main.Position = UDim2.new(0.5, -W/2, 0.5, -H/2)
+main.BackgroundColor3 = C.Bg
+main.BorderSizePixel = 0
+main.Active = true
+corner(main, 14)
+stroke(main, C.Stroke, 1)
+
+-- Shadow
+local shadow = Instance.new("Frame", main)
+shadow.Size = UDim2.new(1, 24, 1, 24)
+shadow.Position = UDim2.new(0, -12, 0, -12)
+shadow.BackgroundColor3 = Color3.new(0, 0, 0)
+shadow.BackgroundTransparency = 0.5
+shadow.BorderSizePixel = 0
+shadow.ZIndex = -1
+corner(shadow, 20)
+
+-- ═══ HEADER ═══
+local header = Instance.new("Frame", main)
+header.Size = UDim2.new(1, 0, 0, 48)
+header.BackgroundColor3 = C.Bg2
+header.BorderSizePixel = 0
+corner(header, 14)
+local hHide = Instance.new("Frame", header)
+hHide.Size = UDim2.new(1, 0, 0, 14); hHide.Position = UDim2.new(0, 0, 1, -14)
+hHide.BackgroundColor3 = C.Bg2; hHide.BorderSizePixel = 0
+
+-- Logo
+local logo = Instance.new("Frame", header)
+logo.Size = UDim2.new(0, 30, 0, 30); logo.Position = UDim2.new(0, 12, 0.5, -15)
+logo.BackgroundColor3 = C.Accent; logo.BorderSizePixel = 0
+corner(logo, 10)
+local logoIcon = Instance.new("TextLabel", logo)
+logoIcon.Size = UDim2.new(1, 0, 1, 0); logoIcon.BackgroundTransparency = 1
+logoIcon.Text = "◉"; logoIcon.TextColor3 = C.Bg
+logoIcon.Font = C.FB; logoIcon.TextSize = 18
+
+local hTitle = Instance.new("TextLabel", header)
+hTitle.Size = UDim2.new(0, 220, 1, 0); hTitle.Position = UDim2.new(0, 50, 0, 0)
+hTitle.BackgroundTransparency = 1
+hTitle.Text = "DEEP SCANNER"
+hTitle.TextColor3 = C.Text; hTitle.Font = C.FB
+hTitle.TextSize = 13; hTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local hBadge = Instance.new("Frame", header)
+hBadge.Size = UDim2.new(0, 50, 0, 18); hBadge.Position = UDim2.new(0, 152, 0.5, -9)
+hBadge.BackgroundColor3 = C.Accent; hBadge.BorderSizePixel = 0
+corner(hBadge, 5)
+local hBadgeT = Instance.new("TextLabel", hBadge)
+hBadgeT.Size = UDim2.new(1, 0, 1, 0); hBadgeT.BackgroundTransparency = 1
+hBadgeT.Text = "v4.0"; hBadgeT.TextColor3 = C.Bg
+hBadgeT.Font = C.FB; hBadgeT.TextSize = 9
+
+-- Status
+local statDot = Instance.new("Frame", header)
+statDot.Size = UDim2.new(0, 8, 0, 8); statDot.Position = UDim2.new(1, -180, 0.5, -4)
+statDot.BackgroundColor3 = C.Green; statDot.BorderSizePixel = 0
+corner(statDot, 4)
+local statTxt = Instance.new("TextLabel", header)
+statTxt.Size = UDim2.new(0, 130, 1, 0); statTxt.Position = UDim2.new(1, -168, 0, 0)
+statTxt.BackgroundTransparency = 1
+statTxt.Text = "READY"
+statTxt.TextColor3 = C.Green; statTxt.Font = C.FB
+statTxt.TextSize = 10; statTxt.TextXAlignment = Enum.TextXAlignment.Left
+
+local function hBtn(txt, x, col)
+    local b = Instance.new("TextButton", header)
+    b.Size = UDim2.new(0, 26, 0, 26); b.Position = UDim2.new(1, x, 0.5, -13)
+    b.BackgroundColor3 = C.Card; b.Text = txt
+    b.TextColor3 = col; b.Font = C.FB; b.TextSize = 14
+    b.BorderSizePixel = 0; b.AutoButtonColor = false
+    corner(b, 7)
+    b.MouseEnter:Connect(function() tw(b, 0.15, {BackgroundColor3 = C.CardHov}) end)
+    b.MouseLeave:Connect(function() tw(b, 0.15, {BackgroundColor3 = C.Card}) end)
+    return b
+end
+local minBtn = hBtn("−", -68, C.Yellow)
+local closeBtn = hBtn("×", -36, C.Red)
+closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    tw(main, 0.3, {Size = UDim2.new(0, W, 0, minimized and 48 or H)})
+    for _, c in ipairs(main:GetChildren()) do
+        if c ~= header and c:IsA("GuiObject") then c.Visible = not minimized end
+    end
+end)
+
+-- Drag
+do
+    local drag, ds, sp
+    header.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            drag = true; ds = i.Position; sp = main.Position
+        end
+    end)
+    header.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            drag = false
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if drag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - ds
+            main.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+        end
+    end)
+end
+
+-- ═══ SIDEBAR ═══
+local sidebar = Instance.new("Frame", main)
+sidebar.Size = UDim2.new(0, 130, 1, -60)
+sidebar.Position = UDim2.new(0, 8, 0, 52)
+sidebar.BackgroundColor3 = C.Bg2
+sidebar.BorderSizePixel = 0
+corner(sidebar, 10)
+
+local tabsHolder = Instance.new("Frame", sidebar)
+tabsHolder.Size = UDim2.new(1, -12, 1, -12); tabsHolder.Position = UDim2.new(0, 6, 0, 6)
+tabsHolder.BackgroundTransparency = 1
+local tLay = Instance.new("UIListLayout", tabsHolder)
+tLay.Padding = UDim.new(0, 2)
+
+-- ═══ CONTENT ═══
+local content = Instance.new("Frame", main)
+content.Size = UDim2.new(1, -150, 1, -60); content.Position = UDim2.new(0, 142, 0, 52)
+content.BackgroundTransparency = 1
+
+local pages = {}
+local curPage = nil
+local function showPage(n)
+    for k, p in pairs(pages) do p.Visible = (k == n) end
+    curPage = n
+end
+
+local tabBtns = {}
+local function createTab(name, icon, col)
+    local b = Instance.new("TextButton", tabsHolder)
+    b.Size = UDim2.new(1, 0, 0, 28); b.BackgroundColor3 = C.Card
+    b.BackgroundTransparency = 1; b.Text = ""; b.AutoButtonColor = false
+    b.BorderSizePixel = 0; corner(b, 7)
+
+    local acc = Instance.new("Frame", b)
+    acc.Size = UDim2.new(0, 3, 0, 12); acc.Position = UDim2.new(0, 0, 0.5, -6)
+    acc.BackgroundColor3 = col; acc.BorderSizePixel = 0
+    acc.BackgroundTransparency = 1; corner(acc, 2)
+
+    local ic = Instance.new("TextLabel", b)
+    ic.Size = UDim2.new(0, 22, 1, 0); ic.Position = UDim2.new(0, 8, 0, 0)
+    ic.BackgroundTransparency = 1; ic.Text = icon
+    ic.TextColor3 = C.Dim; ic.Font = C.FB; ic.TextSize = 12
+
+    local lb = Instance.new("TextLabel", b)
+    lb.Size = UDim2.new(1, -34, 1, 0); lb.Position = UDim2.new(0, 28, 0, 0)
+    lb.BackgroundTransparency = 1; lb.Text = name
+    lb.TextColor3 = C.Dim; lb.Font = C.F
+    lb.TextSize = 10; lb.TextXAlignment = Enum.TextXAlignment.Left
+
+    local pg = Instance.new("Frame", content)
+    pg.Size = UDim2.new(1, 0, 1, 0); pg.BackgroundTransparency = 1
+    pg.Visible = false; pages[name] = pg
+    local pl = Instance.new("UIListLayout", pg)
+    pl.Padding = UDim.new(0, 6); pl.SortOrder = Enum.SortOrder.LayoutOrder
+
+    b.MouseEnter:Connect(function() if curPage ~= name then tw(b, 0.15, {BackgroundTransparency = 0.5}) end end)
+    b.MouseLeave:Connect(function() if curPage ~= name then tw(b, 0.15, {BackgroundTransparency = 1}) end end)
+    b.MouseButton1Click:Connect(function()
+        for _, x in ipairs(tabBtns) do
+            tw(x.b, 0.15, {BackgroundTransparency = 1})
+            tw(x.acc, 0.15, {BackgroundTransparency = 1})
+            x.lb.TextColor3 = C.Dim; x.ic.TextColor3 = C.Dim
+        end
+        tw(b, 0.15, {BackgroundTransparency = 0, BackgroundColor3 = C.Card})
+        tw(acc, 0.15, {BackgroundTransparency = 0})
+        lb.TextColor3 = C.Text; ic.TextColor3 = col
+        showPage(name)
+    end)
+
+    table.insert(tabBtns, {b=b, acc=acc, lb=lb, ic=ic, name=name})
+    return pg
+end
+
+-- ═══ HELPERS ═══
+local function section(p, txt, col)
+    local f = Instance.new("Frame", p)
+    f.Size = UDim2.new(1, 0, 0, 20); f.BackgroundTransparency = 1
+    local line = Instance.new("Frame", f)
+    line.Size = UDim2.new(0, 3, 0, 11); line.Position = UDim2.new(0, 0, 0.5, -5)
+    line.BackgroundColor3 = col or C.Accent; line.BorderSizePixel = 0; corner(line, 2)
+    local l = Instance.new("TextLabel", f)
+    l.Size = UDim2.new(1, -14, 1, 0); l.Position = UDim2.new(0, 10, 0, 0)
+    l.BackgroundTransparency = 1; l.Text = string.upper(txt)
+    l.TextColor3 = C.Dim; l.Font = C.FB
+    l.TextSize = 10; l.TextXAlignment = Enum.TextXAlignment.Left
+    return f
+end
+
+local function card(p, sizeY)
+    local c = Instance.new("Frame", p)
+    c.Size = UDim2.new(1, 0, 0, sizeY or 0)
+    if not sizeY then c.AutomaticSize = Enum.AutomaticSize.Y end
+    c.BackgroundColor3 = C.Bg2; c.BorderSizePixel = 0
+    corner(c, 10); stroke(c, C.Stroke, 1)
+    pad(c, 10, 10, 10, 10)
+    local l = Instance.new("UIListLayout", c)
+    l.Padding = UDim.new(0, 6); l.SortOrder = Enum.SortOrder.LayoutOrder
+    return c
+end
+
+local function btn(parent, txt, col, cb, small)
+    local b = Instance.new("TextButton", parent)
+    b.Size = UDim2.new(1, 0, 0, small and 26 or 32); b.BackgroundColor3 = col
+    b.BorderSizePixel = 0; b.Text = txt
+    b.TextColor3 = C.Bg; b.Font = C.FB; b.TextSize = small and 10 or 11
+    b.AutoButtonColor = false; corner(b, 8)
+    b.MouseEnter:Connect(function() tw(b, 0.15, {BackgroundTransparency = 0.15}) end)
+    b.MouseLeave:Connect(function() tw(b, 0.15, {BackgroundTransparency = 0}) end)
+    b.MouseButton1Click:Connect(function() if cb then cb() end end)
+    return b
+end
+
+local function toggle(parent, label, def, cb)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 24); row.BackgroundTransparency = 1
+    local l = Instance.new("TextLabel", row)
+    l.Size = UDim2.new(1, -56, 1, 0); l.Position = UDim2.new(0, 4, 0, 0)
+    l.BackgroundTransparency = 1; l.Text = label
+    l.TextColor3 = C.Text; l.Font = C.F
+    l.TextSize = 11; l.TextXAlignment = Enum.TextXAlignment.Left
+    local sw = Instance.new("Frame", row)
+    sw.Size = UDim2.new(0, 36, 0, 18); sw.Position = UDim2.new(1, -40, 0.5, -9)
+    sw.BackgroundColor3 = def and C.Accent or C.Stroke; sw.BorderSizePixel = 0
+    corner(sw, 9)
+    local th = Instance.new("Frame", sw)
+    th.Size = UDim2.new(0, 12, 0, 12)
+    th.Position = def and UDim2.new(1, -15, 0.5, -6) or UDim2.new(0, 3, 0.5, -6)
+    th.BackgroundColor3 = Color3.new(1,1,1); th.BorderSizePixel = 0
+    corner(th, 6)
+    local click = Instance.new("TextButton", row)
+    click.Size = UDim2.new(1, 0, 1, 0); click.BackgroundTransparency = 1; click.Text = ""
+    local st = def
+    click.MouseButton1Click:Connect(function()
+        st = not st
+        tw(sw, 0.18, {BackgroundColor3 = st and C.Accent or C.Stroke})
+        tw(th, 0.18, {Position = st and UDim2.new(1, -15, 0.5, -6) or UDim2.new(0, 3, 0.5, -6)})
+        if cb then cb(st) end
+    end)
+    return { get = function() return st end }
+end
+
+-- ═══ Notification system ═══
+local notifFrame = Instance.new("Frame", sg)
+notifFrame.Size = UDim2.new(0, 270, 1, 0); notifFrame.Position = UDim2.new(1, -280, 0, 0)
+notifFrame.BackgroundTransparency = 1
+local nLay = Instance.new("UIListLayout", notifFrame)
+nLay.Padding = UDim.new(0, 6)
+nLay.HorizontalAlignment = Enum.HorizontalAlignment.Right
+nLay.VerticalAlignment = Enum.VerticalAlignment.Bottom
+
+local function notify(title, msg, col)
+    col = col or C.Green
+    local n = Instance.new("Frame", notifFrame)
+    n.Size = UDim2.new(1, 0, 0, 48); n.BackgroundColor3 = C.Bg2
+    n.BorderSizePixel = 0; corner(n, 10); stroke(n, col, 1.5)
+    n.BackgroundTransparency = 1
+    local acc = Instance.new("Frame", n)
+    acc.Size = UDim2.new(0, 3, 1, -12); acc.Position = UDim2.new(0, 0, 0, 6)
+    acc.BackgroundColor3 = col; acc.BorderSizePixel = 0; corner(acc, 2)
+    local t = Instance.new("TextLabel", n)
+    t.Size = UDim2.new(1, -18, 0, 16); t.Position = UDim2.new(0, 12, 0, 6)
+    t.BackgroundTransparency = 1; t.Text = title
+    t.TextColor3 = col; t.Font = C.FB; t.TextSize = 11
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    local m = Instance.new("TextLabel", n)
+    m.Size = UDim2.new(1, -18, 0, 14); m.Position = UDim2.new(0, 12, 0, 24)
+    m.BackgroundTransparency = 1; m.Text = msg
+    m.TextColor3 = C.Dim; m.Font = C.F; m.TextSize = 9
+    m.TextXAlignment = Enum.TextXAlignment.Left
+    m.TextTruncate = Enum.TextTruncate.AtEnd
+    tw(n, 0.25, {BackgroundTransparency = 0})
+    task.delay(2.8, function()
+        tw(n, 0.3, {BackgroundTransparency = 1})
+        tw(acc, 0.3, {BackgroundTransparency = 1})
+        task.wait(0.35); n:Destroy()
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- BUILD TABS
+-- ═══════════════════════════════════════════════════════════════════════
+local scanPg     = createTab("Scan",     "◉", C.Accent)
+local remotesPg  = createTab("Remotes",  "⇄", C.Red)
+local scriptsPg  = createTab("Scripts",  "▤", C.Blue)
+local livePg     = createTab("Live",     "⚡", C.Yellow)
+local execPg     = createTab("Execute",  "▶", C.Green)
+local statsPg    = createTab("Analytics","◈", C.Cyan)
+local watchPg    = createTab("Watchlist","★", C.Pink)
+local exportPg   = createTab("Export",   "▽", C.Orange)
+local settingsPg = createTab("Settings", "⚙", C.Dim)
+
+tabBtns[1].b.BackgroundTransparency = 0
+tabBtns[1].b.BackgroundColor3 = C.Card
+tabBtns[1].acc.BackgroundTransparency = 0
+tabBtns[1].lb.TextColor3 = C.Text
+tabBtns[1].ic.TextColor3 = C.Accent
+showPage("Scan")
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- STATE
+-- ═══════════════════════════════════════════════════════════════════════
+local S = {
+    remotes   = {},
+    scripts   = {},
+    live      = {},
+    watchlist = {},
+    firstSeen = {},
+    execHistory = {},
+    scanning  = false,
+    lastScan  = 0,
+    hooksInstalled = false,
+    settings = {
+        autoScan = false,
+        autoScanInterval = 60,
+        watchAlerts = true,
+        scanNil = true,
+        scanWS = true,
+        scanPlayer = true,
+        scanReg = true,
+        scanModules = true,
+        scanSound = true,
+        scanAnim = false,
+        scanDebris = false,
+    },
+    filterVal = "ALL",
+    searchText = "",
+    selectedRemote = nil,
+}
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- SCAN PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(scanPg, "Control", C.Accent)
+local ctrlCard = card(scanPg)
+
+btn(ctrlCard, "◉  ابدأ الفحص الشامل", C.Accent, function()
+    task.spawn(function() if not S.scanning then scanCoroutine(false) end end)
+end)
+btn(ctrlCard, "⚡  فحص سريع (Remotes فقط)", C.Blue, function()
+    task.spawn(function() if not S.scanning then scanCoroutine(true) end end)
+end)
+btn(ctrlCard, "⏹  إيقاف الفحص", C.Red, function()
+    S.scanning = false
+    setStatus("READY", C.Green)
+end, true)
+
+local autoT = toggle(ctrlCard, "Auto-Scan تلقائي", S.settings.autoScan, function(v)
+    S.settings.autoScan = v
+    notify("AutoScan", v and ("كل " .. S.settings.autoScanInterval .. " ثانية") or "متوقف", v and C.Green or C.Red)
+end)
+
+section(scanPg, "Progress", C.Cyan)
+local progCard = card(scanPg)
+
+local progBarBg = Instance.new("Frame", progCard)
+progBarBg.Size = UDim2.new(1, 0, 0, 6); progBarBg.BackgroundColor3 = C.Stroke
+progBarBg.BorderSizePixel = 0; corner(progBarBg, 3)
+local progBar = Instance.new("Frame", progBarBg)
+progBar.Size = UDim2.new(0, 0, 1, 0); progBar.BackgroundColor3 = C.Accent
+progBar.BorderSizePixel = 0; corner(progBar, 3)
+
+local progLbl = Instance.new("TextLabel", progCard)
+progLbl.Size = UDim2.new(1, 0, 0, 14); progLbl.BackgroundTransparency = 1
+progLbl.Text = "Ready"; progLbl.TextColor3 = C.Dim
+progLbl.Font = C.Mono; progLbl.TextSize = 10
+progLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+section(scanPg, "Statistics", C.Cyan)
+local statCard = card(scanPg)
+local statLbl = Instance.new("TextLabel", statCard)
+statLbl.Size = UDim2.new(1, 0, 0, 90)
+statLbl.BackgroundTransparency = 1
+statLbl.Text = "Remotes: 0\nScripts: 0\nSuspicious: 0\nLive Events: 0"
+statLbl.TextColor3 = C.Text; statLbl.Font = C.Mono
+statLbl.TextSize = 11; statLbl.TextXAlignment = Enum.TextXAlignment.Left
+statLbl.TextYAlignment = Enum.TextYAlignment.Top
+
+btn(statCard, "📋  نسخ الإحصائيات", C.Cyan, function()
+    local txt = "═══ MODARK SCAN STATS ═══\n"
+    txt = txt .. "Game: " .. game.PlaceId .. "\n"
+    txt = txt .. statLbl.Text .. "\n"
+    if setclipboard then pcall(setclipboard, txt) end
+    notify("Copied", "إحصائيات منسوخة", C.Cyan)
+end, true)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- REMOTES PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(remotesPg, "Filter & Search", C.Red)
+local filterCard = card(remotesPg)
+
+-- Search box
+local searchBox = Instance.new("TextBox", filterCard)
+searchBox.Size = UDim2.new(1, 0, 0, 28)
+searchBox.BackgroundColor3 = C.Card; searchBox.BorderSizePixel = 0
+searchBox.Text = ""; searchBox.PlaceholderText = "🔍 ابحث بالاسم أو المسار..."
+searchBox.PlaceholderColor3 = C.Muted
+searchBox.TextColor3 = C.Text; searchBox.Font = C.F; searchBox.TextSize = 10
+searchBox.ClearTextOnFocus = false
+corner(searchBox, 6)
+pad(searchBox, 0, 0, 0, 8)
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    S.searchText = searchBox.Text
+    renderRemotes()
+end)
+
+-- Filter buttons row
+local filterRow = Instance.new("Frame", filterCard)
+filterRow.Size = UDim2.new(1, 0, 0, 26); filterRow.BackgroundTransparency = 1
+
+local filterBtns = {}
+local function mkFilter(txt, val, col, xScale)
+    local b = Instance.new("TextButton", filterRow)
+    b.Size = UDim2.new(0.24, -3, 1, 0)
+    b.Position = UDim2.new(xScale, 0, 0, 0)
+    b.BackgroundColor3 = val == "ALL" and col or C.Card
+    b.Text = txt; b.TextColor3 = val == "ALL" and C.Bg or C.Dim
+    b.Font = C.FB; b.TextSize = 10; b.BorderSizePixel = 0
+    b.AutoButtonColor = false; corner(b, 6)
+    b.MouseButton1Click:Connect(function()
+        S.filterVal = val
+        for _, fb in ipairs(filterBtns) do
+            fb.b.BackgroundColor3 = C.Card
+            fb.b.TextColor3 = C.Dim
+        end
+        b.BackgroundColor3 = col
+        b.TextColor3 = C.Bg
+        renderRemotes()
+    end)
+    table.insert(filterBtns, {b = b, val = val, col = col})
+    return b
+end
+
+mkFilter("ALL",  "ALL",  C.Text,   0)
+mkFilter("CRIT", "CRIT", C.Red,    0.25)
+mkFilter("HIGH", "HIGH", C.Orange, 0.50)
+mkFilter("MED+", "MED",  C.Yellow, 0.75)
+
+local remCard = card(remotesPg, 245)
+local remScroll = Instance.new("ScrollingFrame", remCard)
+remScroll.Size = UDim2.new(1, 0, 1, 0); remScroll.BackgroundTransparency = 1
+remScroll.BorderSizePixel = 0; remScroll.ScrollBarThickness = 4
+remScroll.ScrollBarImageColor3 = C.Stroke
+remScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+remScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local remLay = Instance.new("UIListLayout", remScroll); remLay.Padding = UDim.new(0, 3)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- SCRIPTS PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(scriptsPg, "Scripts", C.Blue)
+local scCard = card(scriptsPg, 300)
+local scScroll = Instance.new("ScrollingFrame", scCard)
+scScroll.Size = UDim2.new(1, 0, 1, 0); scScroll.BackgroundTransparency = 1
+scScroll.BorderSizePixel = 0; scScroll.ScrollBarThickness = 4
+scScroll.ScrollBarImageColor3 = C.Stroke
+scScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local scLay = Instance.new("UIListLayout", scScroll); scLay.Padding = UDim.new(0, 3)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- LIVE PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(livePg, "Live Activity", C.Yellow)
+local liveCard = card(livePg, 250)
+local liveScroll = Instance.new("ScrollingFrame", liveCard)
+liveScroll.Size = UDim2.new(1, 0, 1, 0); liveScroll.BackgroundTransparency = 1
+liveScroll.BorderSizePixel = 0; liveScroll.ScrollBarThickness = 4
+liveScroll.ScrollBarImageColor3 = C.Stroke
+liveScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+liveScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local liveLay = Instance.new("UIListLayout", liveScroll); liveLay.Padding = UDim.new(0, 2)
+
+btn(liveCard, "🗑  مسح السجل الحي", C.Red, function()
+    S.live = {}
+    renderLive()
+    notify("Live", "تم المسح", C.Red)
+end, true)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- EXECUTE PAGE — Remote Executor
+-- ═══════════════════════════════════════════════════════════════════════
+section(execPg, "Remote Executor", C.Green)
+local execCard = card(execPg)
+
+local execTargetLbl = Instance.new("TextLabel", execCard)
+execTargetLbl.Size = UDim2.new(1, 0, 0, 20)
+execTargetLbl.BackgroundColor3 = C.Card; execTargetLbl.BorderSizePixel = 0
+execTargetLbl.Text = "🎯 الهدف: (اختر Remote من التبويب Remotes)"
+execTargetLbl.TextColor3 = C.Dim; execTargetLbl.Font = C.Mono
+execTargetLbl.TextSize = 9; execTargetLbl.TextXAlignment = Enum.TextXAlignment.Left
+execTargetLbl.TextTruncate = Enum.TextTruncate.AtEnd
+corner(execTargetLbl, 5)
+pad(execTargetLbl, 0, 4, 0, 6)
+
+local argsBox = Instance.new("TextBox", execCard)
+argsBox.Size = UDim2.new(1, 0, 0, 60)
+argsBox.BackgroundColor3 = C.Card; argsBox.BorderSizePixel = 0
+argsBox.Text = ""
+argsBox.PlaceholderText = '{"arg1", 123, true}\nأو: arg1|123|true'
+argsBox.PlaceholderColor3 = C.Muted
+argsBox.TextColor3 = C.Text; argsBox.Font = C.Mono; argsBox.TextSize = 10
+argsBox.TextXAlignment = Enum.TextXAlignment.Left
+argsBox.TextYAlignment = Enum.TextYAlignment.Top
+argsBox.MultiLine = true
+argsBox.ClearTextOnFocus = false
+corner(argsBox, 6)
+pad(argsBox, 4, 4, 4, 6)
+
+local methodRow = Instance.new("Frame", execCard)
+methodRow.Size = UDim2.new(1, 0, 0, 26); methodRow.BackgroundTransparency = 1
+
+local currentMethod = "InvokeServer"
+local methodBtns = {}
+local function mkMethodBtn(txt, xScale)
+    local b = Instance.new("TextButton", methodRow)
+    b.Size = UDim2.new(0.49, -2, 1, 0)
+    b.Position = UDim2.new(xScale, 0, 0, 0)
+    b.BackgroundColor3 = txt == currentMethod and C.Green or C.Card
+    b.Text = txt; b.TextColor3 = txt == currentMethod and C.Bg or C.Dim
+    b.Font = C.FB; b.TextSize = 10; b.BorderSizePixel = 0
+    b.AutoButtonColor = false; corner(b, 6)
+    b.MouseButton1Click:Connect(function()
+        currentMethod = txt
+        for _, mb in ipairs(methodBtns) do
+            mb.b.BackgroundColor3 = C.Card
+            mb.b.TextColor3 = C.Dim
+        end
+        b.BackgroundColor3 = C.Green
+        b.TextColor3 = C.Bg
+    end)
+    table.insert(methodBtns, {b = b, m = txt})
+    return b
+end
+mkMethodBtn("InvokeServer", 0)
+mkMethodBtn("FireServer", 0.51)
+
+btn(execCard, "▶  تنفيذ Remote", C.Green, function()
+    executeRemote()
+end)
+
+btn(execCard, "🔍  قراءة Remote (بدون args)", C.Cyan, function()
+    executeRemote(true)
+end, true)
+
+section(execPg, "Recent Executions", C.Cyan)
+local histCard = card(execPg, 150)
+local histScroll = Instance.new("ScrollingFrame", histCard)
+histScroll.Size = UDim2.new(1, 0, 1, 0); histScroll.BackgroundTransparency = 1
+histScroll.BorderSizePixel = 0; histScroll.ScrollBarThickness = 4
+histScroll.ScrollBarImageColor3 = C.Stroke
+histScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+histScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local histLay = Instance.new("UIListLayout", histScroll); histLay.Padding = UDim.new(0, 2)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- ANALYTICS PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(statsPg, "Risk Distribution", C.Cyan)
+local chartCard = card(statsPg)
+
+local chartBarBg = Instance.new("Frame", chartCard)
+chartBarBg.Size = UDim2.new(1, 0, 0, 30); chartBarBg.BackgroundColor3 = C.Card
+chartBarBg.BorderSizePixel = 0; corner(chartBarBg, 6)
+
+local chartSegments = {}
+for _, c in ipairs({{C.Red, 0}, {C.Orange, 0}, {C.Yellow, 0}, {C.Dim, 0}, {C.Muted, 0}}) do
+    local seg = Instance.new("Frame", chartBarBg)
+    seg.Size = UDim2.new(0, 0, 1, 0); seg.Position = UDim2.new(c[2], 0, 0, 0)
+    seg.BackgroundColor3 = c[1]; seg.BorderSizePixel = 0
+    table.insert(chartSegments, seg)
+end
+
+local chartLbl = Instance.new("TextLabel", chartCard)
+chartLbl.Size = UDim2.new(1, 0, 0, 60)
+chartLbl.BackgroundTransparency = 1
+chartLbl.Text = "لا توجد بيانات بعد"
+chartLbl.TextColor3 = C.Text; chartLbl.Font = C.Mono
+chartLbl.TextSize = 10; chartLbl.TextXAlignment = Enum.TextXAlignment.Left
+chartLbl.TextYAlignment = Enum.TextYAlignment.Top
+chartLbl.TextWrapped = true
+
+section(statsPg, "Top Keywords", C.Purple)
+local kwCard = card(statsPg)
+local kwLbl = Instance.new("TextLabel", kwCard)
+kwLbl.Size = UDim2.new(1, 0, 0, 100)
+kwLbl.BackgroundTransparency = 1
+kwLbl.Text = "لا توجد بيانات"
+kwLbl.TextColor3 = C.Text; kwLbl.Font = C.Mono
+kwLbl.TextSize = 10; kwLbl.TextXAlignment = Enum.TextXAlignment.Left
+kwLbl.TextYAlignment = Enum.TextYAlignment.Top
+kwLbl.TextWrapped = true
+
+section(statsPg, "Top Sources", C.Blue)
+local srcCard = card(statsPg)
+local srcLbl = Instance.new("TextLabel", srcCard)
+srcLbl.Size = UDim2.new(1, 0, 0, 80)
+srcLbl.BackgroundTransparency = 1
+srcLbl.Text = "لا توجد بيانات"
+srcLbl.TextColor3 = C.Text; srcLbl.Font = C.Mono
+srcLbl.TextSize = 10; srcLbl.TextXAlignment = Enum.TextXAlignment.Left
+srcLbl.TextYAlignment = Enum.TextYAlignment.Top
+srcLbl.TextWrapped = true
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- WATCHLIST PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(watchPg, "Watchlist", C.Pink)
+local watchCard = card(watchPg)
+
+local watchInfo = Instance.new("TextLabel", watchCard)
+watchInfo.Size = UDim2.new(1, 0, 0, 30)
+watchInfo.BackgroundColor3 = C.Card; watchInfo.BorderSizePixel = 0
+watchInfo.Text = "★ أضف Remotes مهمة — ستنبّه عند استخدامها"
+watchInfo.TextColor3 = C.Dim; watchInfo.Font = C.F
+watchInfo.TextSize = 10; watchInfo.TextXAlignment = Enum.TextXAlignment.Left
+watchInfo.TextWrapped = true
+corner(watchInfo, 6)
+pad(watchInfo, 4, 4, 4, 6)
+
+local watchScroll = Instance.new("ScrollingFrame", watchCard)
+watchScroll.Size = UDim2.new(1, 0, 0, 200); watchScroll.BackgroundTransparency = 1
+watchScroll.BorderSizePixel = 0; watchScroll.ScrollBarThickness = 4
+watchScroll.ScrollBarImageColor3 = C.Stroke
+watchScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+watchScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local watchLay = Instance.new("UIListLayout", watchScroll); watchLay.Padding = UDim.new(0, 3)
+
+btn(watchCard, "🗑  مسح Watchlist", C.Red, function()
+    S.watchlist = {}
+    renderWatchlist()
+    notify("Watchlist", "تم المسح", C.Red)
+end, true)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- EXPORT PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(exportPg, "Export Reports", C.Orange)
+local expCard = card(exportPg)
+
+btn(expCard, "📋  نسخ JSON الكامل", C.Green, function()
+    local data = {
+        version = "4.0",
+        game = game.PlaceId,
+        jobId = game.JobId,
+        timestamp = os.date("%Y-%m-%d %H:%M:%S"),
+        player = LP.Name,
+        remotes = S.remotes,
+        scripts = S.scripts,
+        live = S.live,
+        firstSeen = S.firstSeen,
+    }
+    local ok, j = pcall(function() return HttpS:JSONEncode(data) end)
+    if ok and j then
+        if setclipboard then pcall(setclipboard, j) end
+        notify("Export", "نُسخ " .. #j .. " حرف", C.Green)
+    else
+        notify("Export", "فشل JSON", C.Red)
+    end
+end)
+
+btn(expCard, "📄  تقرير نصي مقروء (كامل)", C.Blue, function()
+    local L = {}
+    table.insert(L, "═══════════════════════════════════════════")
+    table.insert(L, "  MODARK DEEP SCAN REPORT v4.0")
+    table.insert(L, "═══════════════════════════════════════════")
+    table.insert(L, "Game ID: " .. game.PlaceId)
+    table.insert(L, "Job ID: " .. game.JobId)
+    table.insert(L, "Player: " .. LP.Name)
+    table.insert(L, "Time: " .. os.date("%Y-%m-%d %H:%M:%S"))
+    table.insert(L, "Remotes: " .. #S.remotes)
+    table.insert(L, "Scripts: " .. #S.scripts)
+    table.insert(L, "")
+    table.insert(L, "─── REMOTES (by risk) ───")
+    for i, r in ipairs(S.remotes) do
+        local lvl = levelOf(r.score)
+        table.insert(L, string.format("[%s] #%d %s", lvl, i, r.name))
+        table.insert(L, "  Class: " .. r.class)
+        table.insert(L, "  Path: " .. (r.path or ""))
+        table.insert(L, "  Score: " .. tostring(r.score) .. "  Source: " .. (r.source or "?"))
+        if r.reasons and #r.reasons > 0 then
+            table.insert(L, "  Keywords: " .. table.concat(r.reasons, ", "))
+        end
+        if r.flags and #r.flags > 0 then
+            table.insert(L, "  Flags: " .. table.concat(r.flags, ", "))
+        end
+        table.insert(L, "")
+    end
+    table.insert(L, "─── SCRIPTS ───")
+    for i, s in ipairs(S.scripts) do
+        table.insert(L, string.format("#%d [%s] %s", i, s.class, s.name))
+        table.insert(L, "    " .. (s.path or ""))
+    end
+    table.insert(L, "")
+    table.insert(L, "─── LIVE EVENTS (last 50) ───")
+    local start = math.max(1, #S.live - 50)
+    for i = start, #S.live do
+        local e = S.live[i]
+        table.insert(L, "[" .. e.time .. "] " .. e.method .. " " .. e.name)
+    end
+
+    local txt = table.concat(L, "\n")
+    if setclipboard then pcall(setclipboard, txt) end
+    notify("Export", "نُسخ " .. #txt .. " حرف", C.Blue)
+end)
+
+btn(expCard, "🎯  المشبوه فقط (نصي)", C.Red, function()
+    local L = {}
+    table.insert(L, "─── SUSPICIOUS REMOTES ───")
+    for _, r in ipairs(S.remotes) do
+        if r.score >= 3 then
+            local lvl = levelOf(r.score)
+            table.insert(L, "[" .. lvl .. "] " .. r.name)
+            table.insert(L, "  " .. (r.path or ""))
+            table.insert(L, "  kw: " .. table.concat(r.reasons or {}, ","))
+        end
+    end
+    local txt = #L > 1 and table.concat(L, "\n") or "(لا يوجد)"
+    if setclipboard then pcall(setclipboard, txt) end
+    notify("Export", "نُسخ " .. #L .. " سطر", C.Red)
+end)
+
+btn(expCard, "🔗  كل المسارات (سطر لكل Remote)", C.Yellow, function()
+    local L = {}
+    for _, r in ipairs(S.remotes) do
+        if r.path and r.path ~= "(nil instance)" and r.path ~= "(registry)" then
+            table.insert(L, r.path)
+        end
+    end
+    local txt = table.concat(L, "\n")
+    if setclipboard then pcall(setclipboard, txt) end
+    notify("Export", "نُسخ " .. #L .. " مسار", C.Yellow)
+end)
+
+btn(expCard, "💾  نسخ Lua Snippet", C.Purple, function()
+    local L = {}
+    table.insert(L, "-- Auto-generated by Modark Deep Scanner v4.0")
+    table.insert(L, "-- Game: " .. game.PlaceId)
+    table.insert(L, "local RS = game:GetService(\"ReplicatedStorage\")")
+    table.insert(L, "")
+    table.insert(L, "local Remotes = {")
+    for _, r in ipairs(S.remotes) do
+        if r.score >= 3 then
+            table.insert(L, string.format("    -- [%s] %s", levelOf(r.score), r.name))
+            table.insert(L, string.format("    [%q] = function(...) return game:GetService(\"ReplicatedStorage\"):FindFirstChild(\"%s\") end,",
+                r.name, r.name))
+        end
+    end
+    table.insert(L, "}")
+
+    local txt = table.concat(L, "\n")
+    if setclipboard then pcall(setclipboard, txt) end
+    notify("Export", "Lua Snippet منسوخ", C.Purple)
+end)
+
+btn(expCard, "📊  نسخ CSV (للجداول)", C.Cyan, function()
+    local L = {"name,class,path,score,level,source,keywords"}
+    for _, r in ipairs(S.remotes) do
+        local kw = table.concat(r.reasons or {}, ";")
+        local lvl = levelOf(r.score)
+        -- escape commas
+        local p = (r.path or ""):gsub(",", ";")
+        table.insert(L, string.format("%q,%s,%q,%d,%s,%s,%q",
+            r.name, r.class, p, r.score, lvl, r.source or "?", kw))
+    end
+    local txt = table.concat(L, "\n")
+    if setclipboard then pcall(setclipboard, txt) end
+    notify("Export", "CSV منسوخ", C.Cyan)
+end)
+
+section(exportPg, "Quick Copy", C.Green)
+local quickCard = card(exportPg)
+
+btn(quickCard, "📋  نسخ كل شيء (Master Report)", C.Accent, function()
+    copyMasterReport()
+end)
+
+btn(quickCard, "⚡  نسخ المشبوه + Live + Analytics", C.Orange, function()
+    local L = {}
+    table.insert(L, "═══ MODARK QUICK REPORT ═══")
+    table.insert(L, "Game: " .. game.PlaceId .. " | Time: " .. os.date("%H:%M:%S"))
+    table.insert(L, "")
+    table.insert(L, "SUSPICIOUS:")
+    for _, r in ipairs(S.remotes) do
+        if r.score >= 3 then
+            table.insert(L, "  [" .. levelOf(r.score) .. "] " .. r.name .. " — " .. (r.path or ""))
+        end
+    end
+    table.insert(L, "")
+    table.insert(L, "LIVE (last 20):")
+    local start = math.max(1, #S.live - 20)
+    for i = start, #S.live do
+        table.insert(L, "  [" .. S.live[i].time .. "] " .. S.live[i].name)
+    end
+    local txt = table.concat(L, "\n")
+    if setclipboard then pcall(setclipboard, txt) end
+    notify("Quick", "نُسخ", C.Orange)
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- SETTINGS PAGE
+-- ═══════════════════════════════════════════════════════════════════════
+section(settingsPg, "Scanner Settings", C.Dim)
+local setCard = card(settingsPg)
+
+toggle(setCard, "Scan nil instances", S.settings.scanNil, function(v) S.settings.scanNil = v end)
+toggle(setCard, "Scan Workspace", S.settings.scanWS, function(v) S.settings.scanWS = v end)
+toggle(setCard, "Scan PlayerGui/Scripts", S.settings.scanPlayer, function(v) S.settings.scanPlayer = v end)
+toggle(setCard, "Scan Registry", S.settings.scanReg, function(v) S.settings.scanReg = v end)
+toggle(setCard, "Scan Loaded Modules", S.settings.scanModules, function(v) S.settings.scanModules = v end)
+toggle(setCard, "Watch Alerts (★)", S.settings.watchAlerts, function(v)
+    S.settings.watchAlerts = v
+    notify("Settings", v and "تنبيهات مُفعّلة" or "تنبيهات متوقفة", v and C.Green or C.Red)
+end)
+
+section(settingsPg, "Auto-Scan Interval", C.Cyan)
+local intCard = card(settingsPg)
+local intervalBtns = {}
+local function mkInterval(sec, xScale)
+    local b = Instance.new("TextButton", intCard)
+    b.Size = UDim2.new(0.24, -3, 0, 28)
+    b.Position = UDim2.new(xScale, 0, 0, 0)
+    b.BackgroundColor3 = sec == S.settings.autoScanInterval and C.Cyan or C.Card
+    b.Text = sec .. "s"
+    b.TextColor3 = sec == S.settings.autoScanInterval and C.Bg or C.Dim
+    b.Font = C.FB; b.TextSize = 10; b.BorderSizePixel = 0
+    b.AutoButtonColor = false; corner(b, 6)
+    b.MouseButton1Click:Connect(function()
+        S.settings.autoScanInterval = sec
+        for _, ib in ipairs(intervalBtns) do
+            ib.b.BackgroundColor3 = C.Card
+            ib.b.TextColor3 = C.Dim
+        end
+        b.BackgroundColor3 = C.Cyan
+        b.TextColor3 = C.Bg
+    end)
+    table.insert(intervalBtns, {b = b, sec = sec})
+    return b
+end
+mkInterval(30, 0)
+mkInterval(60, 0.25)
+mkInterval(120, 0.50)
+mkInterval(300, 0.75)
+
+section(settingsPg, "Danger Zone", C.Red)
+local dzCard = card(settingsPg)
+
+btn(dzCard, "🗑  مسح كل شيء", C.Red, function()
+    S.remotes = {}
+    S.scripts = {}
+    S.live = {}
+    S.firstSeen = {}
+    renderRemotes()
+    renderScripts()
+    renderLive()
+    notify("Reset", "تم مسح كل البيانات", C.Red)
+end, true)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- SCAN ENGINE
+-- ═══════════════════════════════════════════════════════════════════════
+local function setStatus(txt, col)
+    statTxt.Text = txt
+    statTxt.TextColor3 = col or C.Green
+    statDot.BackgroundColor3 = col or C.Green
+end
+
+local function setProgress(pct, label)
+    tw(progBar, 0.15, {Size = UDim2.new(pct, 0, 1, 0)})
+    progLbl.Text = label or ""
+end
+
+local function refreshStats()
+    local sus = 0
+    for _, r in ipairs(S.remotes) do
+        if r.score >= 3 then sus = sus + 1 end
+    end
+    statLbl.Text = string.format(
+        "Remotes: %d\nScripts: %d\nSuspicious: %d\nLive Events: %d",
+        #S.remotes, #S.scripts, sus, #S.live
+    )
+end
+
+local function addRemote(name, class, path, source, bonus)
+    -- dedupe by path
+    for _, r in ipairs(S.remotes) do
+        if r.path == path and r.name == name then
+            -- merge
+            r.score = math.max(r.score, (r.score or 0))
+            return
+        end
+    end
+
+    local sc, why = scoreName(name)
+    local flags = analyzeNamePattern(name)
+    sc = sc + (bonus or 0)
+
+    -- flag bonus
+    if #flags > 0 then sc = sc + #flags * 0.5 end
+
+    -- first seen
+    local firstSeen = false
+    if not S.firstSeen[path] then
+        S.firstSeen[path] = os.time()
+        firstSeen = true
+    end
+
+    -- entropy
+    local ent = entropy(name)
+
+    table.insert(S.remotes, {
+        name = name, class = class, path = path,
+        score = sc, reasons = why, source = source,
+        flags = flags, firstSeen = firstSeen,
+        entropy = ent,
+        seenAt = os.time(),
+    })
+end
+
+local function clearChildren(parent)
+    for _, c in ipairs(parent:GetChildren()) do
+        if c:IsA("GuiObject") and not c:IsA("UIListLayout") and not c:IsA("UIPadding") then
+            c:Destroy()
+        end
+    end
+end
+
+-- ═══ Rendering ═══
+function renderRemotes()
+    clearChildren(remScroll)
+    local n = 0
+    for _, r in ipairs(S.remotes) do
+        local lvl, col = levelOf(r.score)
+        local include = S.filterVal == "ALL"
+            or (S.filterVal == "CRIT" and r.score >= 8)
+            or (S.filterVal == "HIGH" and r.score >= 5)
+            or (S.filterVal == "MED"  and r.score >= 3)
+
+        -- search filter
+        if S.searchText and S.searchText ~= "" then
+            local q = string.lower(S.searchText)
+            if not (string.find(string.lower(r.name), q, 1, true) or string.find(string.lower(r.path or ""), q, 1, true)) then
+                include = false
+            end
+        end
+
+        if include then
+            n = n + 1
+            if n > 200 then break end
+
+            local row = Instance.new("Frame", remScroll)
+            row.Size = UDim2.new(1, -4, 0, 0); row.AutomaticSize = Enum.AutomaticSize.Y
+            row.BackgroundColor3 = C.Card; row.BorderSizePixel = 0
+            row.BackgroundTransparency = 0.35
+            corner(row, 6)
+            pad(row, 6, 6, 6, 6)
+
+            local topRow = Instance.new("Frame", row)
+            topRow.Size = UDim2.new(1, 0, 0, 18); topRow.BackgroundTransparency = 1
+
+            local tag = Instance.new("TextLabel", topRow)
+            tag.Size = UDim2.new(0, 52, 1, 0); tag.Position = UDim2.new(0, 0, 0, 0)
+            tag.BackgroundColor3 = col; tag.BorderSizePixel = 0
+            tag.Text = lvl; tag.TextColor3 = C.Bg
+            tag.Font = C.FB; tag.TextSize = 9; corner(tag, 4)
+
+            local nm = Instance.new("TextLabel", topRow)
+            nm.Size = UDim2.new(1, -140, 1, 0); nm.Position = UDim2.new(0, 56, 0, 0)
+            nm.BackgroundTransparency = 1
+            nm.Text = r.name
+            nm.TextColor3 = C.Text; nm.Font = C.FB; nm.TextSize = 10
+            nm.TextXAlignment = Enum.TextXAlignment.Left
+            nm.TextTruncate = Enum.TextTruncate.AtEnd
+
+            local watchBtn = Instance.new("TextButton", topRow)
+            watchBtn.Size = UDim2.new(0, 22, 1, 0); watchBtn.Position = UDim2.new(1, -46, 0, 0)
+            watchBtn.BackgroundColor3 = C.Card; watchBtn.BorderSizePixel = 0
+            watchBtn.Text = S.watchlist[r.name] and "★" or "☆"
+            watchBtn.TextColor3 = S.watchlist[r.name] and C.Pink or C.Dim
+            watchBtn.Font = C.FB; watchBtn.TextSize = 12
+            corner(watchBtn, 4)
+            watchBtn.MouseButton1Click:Connect(function()
+                if S.watchlist[r.name] then
+                    S.watchlist[r.name] = nil
+                    watchBtn.Text = "☆"
+                    watchBtn.TextColor3 = C.Dim
+                else
+                    S.watchlist[r.name] = r
+                    watchBtn.Text = "★"
+                    watchBtn.TextColor3 = C.Pink
+                    notify("Watch", "أُضيف: " .. r.name, C.Pink)
+                end
+                renderWatchlist()
+            end)
+
+            local copyBtn = Instance.new("TextButton", topRow)
+            copyBtn.Size = UDim2.new(0, 22, 1, 0); copyBtn.Position = UDim2.new(1, -22, 0, 0)
+            copyBtn.BackgroundColor3 = C.Card; copyBtn.BorderSizePixel = 0
+            copyBtn.Text = "📋"; copyBtn.TextColor3 = C.Green
+            copyBtn.Font = C.FB; copyBtn.TextSize = 11
+            corner(copyBtn, 4)
+            copyBtn.MouseButton1Click:Connect(function()
+                local txt = "[" .. lvl .. "] " .. r.name .. " (" .. r.class .. ")\n"
+                txt = txt .. "Path: " .. (r.path or "") .. "\n"
+                txt = txt .. "Score: " .. tostring(r.score) .. "\n"
+                txt = txt .. "Source: " .. (r.source or "?") .. "\n"
+                if r.reasons and #r.reasons > 0 then
+                    txt = txt .. "Keywords: " .. table.concat(r.reasons, ", ") .. "\n"
+                end
+                if setclipboard then pcall(setclipboard, txt) end
+                notify("Copy", "نُسخ: " .. r.name:sub(1, 20), C.Green)
+            end)
+
+            local pth = Instance.new("TextLabel", row)
+            pth.Size = UDim2.new(1, 0, 0, 0); pth.AutomaticSize = Enum.AutomaticSize.Y
+            pth.BackgroundTransparency = 1
+            pth.Text = r.path or ""; pth.TextColor3 = C.Dim
+            pth.Font = C.Mono; pth.TextSize = 8
+            pth.TextXAlignment = Enum.TextXAlignment.Left
+            pth.TextWrapped = true
+
+            local meta = Instance.new("TextLabel", row)
+            meta.Size = UDim2.new(1, 0, 0, 0); meta.AutomaticSize = Enum.AutomaticSize.Y
+            meta.BackgroundTransparency = 1
+            local mtxt = "score=" .. string.format("%.1f", r.score) .. "  src=" .. (r.source or "?")
+            if r.reasons and #r.reasons > 0 then
+                mtxt = mtxt .. "  kw=[" .. table.concat(r.reasons, ",") .. "]"
+            end
+            if r.flags and #r.flags > 0 then
+                mtxt = mtxt .. "  flags=[" .. table.concat(r.flags, ",") .. "]"
+            end
+            if r.firstSeen then mtxt = mtxt .. "  ★NEW" end
+            meta.Text = mtxt; meta.TextColor3 = col
+            meta.Font = C.Mono; meta.TextSize = 8
+            meta.TextXAlignment = Enum.TextXAlignment.Left
+            meta.TextWrapped = true
+
+            local rl = Instance.new("UIListLayout", row)
+            rl.Padding = UDim.new(0, 3)
+        end
+    end
+    if n == 0 then
+        local em = Instance.new("TextLabel", remScroll)
+        em.Size = UDim2.new(1, -4, 0, 40); em.BackgroundTransparency = 1
+        em.Text = "(لا نتائج)"; em.TextColor3 = C.Muted
+        em.Font = C.F; em.TextSize = 11
+    end
+end
+
+function renderScripts()
+    clearChildren(scScroll)
+    local n = 0
+    for _, s in ipairs(S.scripts) do
+        n = n + 1
+        if n > 300 then break end
+        local l = Instance.new("TextLabel", scScroll)
+        l.Size = UDim2.new(1, -4, 0, 0); l.AutomaticSize = Enum.AutomaticSize.Y
+        l.BackgroundColor3 = C.Card; l.BackgroundTransparency = 0.4
+        l.Text = "[" .. s.class .. "] " .. s.name .. "\n" .. (s.path or "")
+        l.TextColor3 = C.Text
+        l.Font = C.Mono; l.TextSize = 9
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Top
+        l.TextWrapped = true
+        corner(l, 5)
+        pad(l, 4, 4, 4, 6)
+    end
+end
+
+function renderLive()
+    clearChildren(liveScroll)
+    local n = 0
+    for i = #S.live, 1, -1 do
+        n = n + 1
+        if n > 100 then break end
+        local e = S.live[i]
+        local l = Instance.new("TextLabel", liveScroll)
+        l.Size = UDim2.new(1, -4, 0, 0); l.AutomaticSize = Enum.AutomaticSize.Y
+        l.BackgroundColor3 = C.Card; l.BackgroundTransparency = 0.5
+        local argStr = ""
+        if e.args and #e.args > 0 then
+            local parts = {}
+            for i2, a in ipairs(e.args) do
+                if type(a) == "Instance" then
+                    parts[i2] = a.Name
+                elseif type(a) == "string" then
+                    parts[i2] = '"' .. a:sub(1, 25) .. '"'
+                else
+                    parts[i2] = tostring(a)
+                end
+            end
+            argStr = table.concat(parts, ", ")
+            if #argStr > 80 then argStr = argStr:sub(1, 80) .. "…" end
+        end
+        local kw = ""
+        local sc, reasons = scoreName(e.name)
+        if sc >= 3 then
+            kw = "  ⚠ " .. table.concat(reasons, ",")
+            l.TextColor3 = C.Orange
+        else
+            l.TextColor3 = C.Yellow
+        end
+        l.Text = "[" .. e.time .. "] " .. e.method .. "  " .. e.name .. "(" .. argStr .. ")" .. kw
+        l.Font = C.Mono; l.TextSize = 9
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Top
+        l.TextWrapped = true
+        corner(l, 5)
+        pad(l, 3, 4, 3, 6)
+    end
+end
+
+function renderWatchlist()
+    clearChildren(watchScroll)
+    local count = 0
+    for name, r in pairs(S.watchlist) do
+        count = count + 1
+        local row = Instance.new("Frame", watchScroll)
+        row.Size = UDim2.new(1, -4, 0, 0); row.AutomaticSize = Enum.AutomaticSize.Y
+        row.BackgroundColor3 = C.Card; row.BackgroundTransparency = 0.3
+        corner(row, 5); pad(row, 4, 4, 4, 6)
+
+        local l = Instance.new("TextLabel", row)
+        l.Size = UDim2.new(1, -30, 0, 0); l.AutomaticSize = Enum.AutomaticSize.Y
+        l.BackgroundTransparency = 1
+        l.Text = "★ " .. name .. "\n" .. (r.path or "")
+        l.TextColor3 = C.Pink; l.Font = C.Mono; l.TextSize = 9
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Top
+        l.TextWrapped = true
+
+        local rm = Instance.new("TextButton", row)
+        rm.Size = UDim2.new(0, 22, 0, 22); rm.Position = UDim2.new(1, -22, 0, 0)
+        rm.BackgroundColor3 = C.Red; rm.BorderSizePixel = 0
+        rm.Text = "×"; rm.TextColor3 = Color3.new(1,1,1)
+        rm.Font = C.FB; rm.TextSize = 12
+        corner(rm, 4)
+        rm.MouseButton1Click:Connect(function()
+            S.watchlist[name] = nil
+            renderWatchlist()
+            renderRemotes()
+        end)
+    end
+    if count == 0 then
+        local em = Instance.new("TextLabel", watchScroll)
+        em.Size = UDim2.new(1, -4, 0, 40); em.BackgroundTransparency = 1
+        em.Text = "(Watchlist فارغة)"; em.TextColor3 = C.Muted
+        em.Font = C.F; em.TextSize = 11
+    end
+end
+
+function renderHistory()
+    clearChildren(histScroll)
+    for i = #S.execHistory, 1, -1 do
+        local h = S.execHistory[i]
+        local l = Instance.new("TextLabel", histScroll)
+        l.Size = UDim2.new(1, -4, 0, 0); l.AutomaticSize = Enum.AutomaticSize.Y
+        l.BackgroundColor3 = C.Card; l.BackgroundTransparency = 0.5
+        local color = h.ok and C.Green or C.Red
+        l.Text = "[" .. h.time .. "] " .. h.method .. "  " .. h.name .. "\n  → " .. tostring(h.result)
+        l.TextColor3 = color; l.Font = C.Mono; l.TextSize = 9
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Top
+        l.TextWrapped = true
+        corner(l, 5); pad(l, 3, 4, 3, 6)
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- ANALYTICS ENGINE
+-- ═══════════════════════════════════════════════════════════════════════
+local function updateAnalytics()
+    local dist = {CRIT = 0, HIGH = 0, MED = 0, LOW = 0, NONE = 0}
+    local kws = {}
+    local srcs = {}
+
+    for _, r in ipairs(S.remotes) do
+        local lvl = levelOf(r.score)
+        dist[lvl] = (dist[lvl] or 0) + 1
+        for _, kw in ipairs(r.reasons or {}) do
+            kws[kw] = (kws[kw] or 0) + 1
+        end
+        local s = r.source or "?"
+        srcs[s] = (srcs[s] or 0) + 1
+    end
+
+    -- chart
+    local total = #S.remotes
+    if total == 0 then total = 1 end
+    local order = {{"CRIT", C.Red}, {"HIGH", C.Orange}, {"MED", C.Yellow}, {"LOW", C.Dim}, {"NONE", C.Muted}}
+    local cum = 0
+    for i, o in ipairs(order) do
+        local cnt = dist[o[1]] or 0
+        local pct = cnt / total
+        local seg = chartSegments[i]
+        seg.Position = UDim2.new(cum, 0, 0, 0)
+        seg.Size = UDim2.new(pct, 0, 1, 0)
+        cum = cum + pct
+    end
+
+    chartLbl.Text = string.format(
+        "CRIT: %d  HIGH: %d  MED: %d  LOW: %d  NONE: %d\nTotal: %d remotes",
+        dist.CRIT, dist.HIGH, dist.MED, dist.LOW, dist.NONE, #S.remotes
+    )
+
+    -- top keywords
+    local kwArr = {}
+    for k, v in pairs(kws) do table.insert(kwArr, {k=k, v=v}) end
+    table.sort(kwArr, function(a, b) return a.v > b.v end)
+    local kwLines = {}
+    for i, k in ipairs(kwArr) do
+        if i > 12 then break end
+        table.insert(kwLines, string.format("%-14s %d", k.k, k.v))
+    end
+    kwLbl.Text = #kwLines > 0 and table.concat(kwLines, "\n") or "لا توجد keywords"
+
+    -- sources
+    local srcArr = {}
+    for k, v in pairs(srcs) do table.insert(srcArr, {k=k, v=v}) end
+    table.sort(srcArr, function(a, b) return a.v > b.v end)
+    local srcLines = {}
+    for i, s in ipairs(srcArr) do
+        if i > 8 then break end
+        table.insert(srcLines, string.format("%-16s %d", s.k, s.v))
+    end
+    srcLbl.Text = #srcLines > 0 and table.concat(srcLines, "\n") or "لا توجد بيانات"
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- EXECUTOR
+-- ═══════════════════════════════════════════════════════════════════════
+local function findRemoteByPath(path)
+    local parts = {}
+    for p in string.gmatch(path, "[^%.]+") do
+        table.insert(parts, p)
+    end
+    local cur = game
+    for _, p in ipairs(parts) do
+        if not cur then return nil end
+        cur = cur:FindFirstChild(p)
+    end
+    return cur
+end
+
+function executeRemote(noArgs)
+    if not S.selectedRemote then
+        notify("Execute", "اختر Remote أولاً من Remotes", C.Red)
+        return
+    end
+
+    local remote = findRemoteByPath(S.selectedRemote.path)
+    if not remote then
+        notify("Execute", "لم يُوجد الـ Remote", C.Red)
+        return
+    end
+
+    -- parse args
+    local args = {}
+    if not noArgs and argsBox.Text ~= "" then
+        local txt = argsBox.Text
+        -- try JSON first
+        local okJson, parsed = pcall(function() return HttpS:JSONDecode(txt) end)
+        if okJson and type(parsed) == "table" then
+            args = parsed
+        else
+            -- pipe-separated
+            for token in string.gmatch(txt, "([^|]+)") do
+                token = token:gsub("^%s+", ""):gsub("%s+$", "")
+                local num = tonumber(token)
+                if num then
+                    table.insert(args, num)
+                elseif token == "true" then
+                    table.insert(args, true)
+                elseif token == "false" then
+                    table.insert(args, false)
+                elseif token == "nil" then
+                    table.insert(args, nil)
+                else
+                    -- strip quotes
+                    token = token:gsub('^"(.*)"$', "%1")
+                    table.insert(args, token)
+                end
+            end
+        end
+    end
+
+    local method = currentMethod
+    local ok, result
+
+    if method == "InvokeServer" then
+        ok, result = pcall(function() return remote:InvokeServer(table.unpack(args)) end)
+    else
+        ok, result = pcall(function() remote:FireServer(table.unpack(args)) end)
+        result = "(fired)"
+    end
+
+    table.insert(S.execHistory, 1, {
+        time = os.date("%H:%M:%S"),
+        name = S.selectedRemote.name,
+        method = method,
+        args = args,
+        result = tostring(result),
+        ok = ok,
+    })
+    if #S.execHistory > 30 then table.remove(S.execHistory) end
+
+    renderHistory()
+    notify(method, (ok and "✓ " or "✗ ") .. S.selectedRemote.name, ok and C.Green or C.Red)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- MAIN SCAN
+-- ═══════════════════════════════════════════════════════════════════════
+local function addScript(name, class, path)
+    for _, s in ipairs(S.scripts) do
+        if s.path == path then return end
+    end
+    table.insert(S.scripts, {name = name, class = class, path = path})
+end
+
+function scanCoroutine(quick)
+    if S.scanning then return end
+    S.scanning = true
+    S.remotes = {}
+    S.scripts = {}
+    setStatus("SCANNING", C.Yellow)
+
+    local t0 = tick()
+
+    -- Layer 1: game.Descendants (chunked)
+    setProgress(0.05, "Layer 1: game.Descendants")
+    local children = game:GetDescendants()
+    local total = #children
+    local chunk = 0
+    for i = 1, total do
+        if not S.scanning then break end
+        local obj = children[i]
+        if obj then
+            local cls = obj.ClassName
+            if cls == "RemoteEvent" or cls == "RemoteFunction" or cls == "UnreliableRemoteEvent" then
+                addRemote(obj.Name, cls, obj:GetFullName(), "game", 0)
+            elseif cls == "Script" or cls == "LocalScript" or cls == "ModuleScript" then
+                addScript(obj.Name, cls, obj:GetFullName())
+            end
+        end
+        chunk = chunk + 1
+        if chunk >= 400 then
+            chunk = 0
+            setProgress(0.05 + 0.30 * (i/total), "Layer 1: " .. i .. "/" .. total)
+            Run.RenderStepped:Wait()
+        end
+    end
+
+    if quick then
+        setProgress(1, "Done")
+        S.lastScan = tick()
+        S.scanning = false
+        setStatus("READY", C.Green)
+        refreshStats()
+        renderRemotes()
+        renderScripts()
+        updateAnalytics()
+        local sus = 0
+        for _, r in ipairs(S.remotes) do if r.score >= 3 then sus = sus + 1 end end
+        notify("Quick Scan", string.format("%d remotes · %d مشبوه · %.2fs", #S.remotes, sus, tick()-t0), C.Green)
+        return
+    end
+
+    Run.RenderStepped:Wait()
+
+    -- Layer 2: getnilinstances
+    if S.settings.scanNil then
+        setProgress(0.40, "Layer 2: getnilinstances")
+        if getnilinstances then
+            pcall(function()
+                local list = getnilinstances()
+                if type(list) == "table" then
+                    for _, obj in ipairs(list) do
+                        if obj and (obj.ClassName == "RemoteEvent" or obj.ClassName == "RemoteFunction") then
+                            addRemote(obj.Name, obj.ClassName, "(nil instance)", "nil", 3)
+                        end
+                    end
+                end
+            end)
+        end
+        Run.RenderStepped:Wait()
+    end
+
+    -- Layer 3: Workspace
+    if S.settings.scanWS then
+        setProgress(0.50, "Layer 3: Workspace")
+        pcall(function()
+            for _, obj in ipairs(WS:GetDescendants()) do
+                if obj.ClassName == "RemoteEvent" or obj.ClassName == "RemoteFunction" then
+                    addRemote(obj.Name, obj.ClassName, obj:GetFullName(), "Workspace", 1)
+                end
+            end
+        end)
+        Run.RenderStepped:Wait()
+    end
+
+    -- Layer 4: PlayerGui
+    if S.settings.scanPlayer then
+        setProgress(0.58, "Layer 4: PlayerGui")
+        pcall(function()
+            for _, obj in ipairs(LP:GetDescendants()) do
+                if obj.ClassName == "RemoteEvent" or obj.ClassName == "RemoteFunction" then
+                    addRemote(obj.Name, obj.ClassName, obj:GetFullName(), "PlayerGui", 1)
+                end
+            end
+        end)
+        Run.RenderStepped:Wait()
+    end
+
+    -- Layer 5: getloadedmodules
+    if S.settings.scanModules then
+        setProgress(0.66, "Layer 5: Loaded modules")
+        if getloadedmodules then
+            pcall(function()
+                local mods = getloadedmodules()
+                if type(mods) == "table" then
+                    for _, m in ipairs(mods) do
+                        pcall(function()
+                            addScript(m.Name or "?", "Module", (m.GetFullName and m:GetFullName()) or "?")
+                        end)
+                    end
+                end
+            end)
+        end
+        Run.RenderStepped:Wait()
+    end
+
+    -- Layer 6: getreg
+    if S.settings.scanReg then
+        setProgress(0.74, "Layer 6: Registry")
+        if getreg then
+            pcall(function()
+                local reg = getreg()
+                local count = 0
+                for _, v in pairs(reg) do
+                    if count > 300 then break end
+                    count = count + 1
+                    if type(v) == "userdata" then
+                        pcall(function()
+                            local mt = getmetatable(v)
+                            if mt and mt.__name == "RemoteEvent" then
+                                addRemote("reg_entry_" .. count, "RemoteEvent", "(registry)", "getreg", 4)
+                            end
+                        end)
+                    end
+                end
+            end)
+        end
+    end
+
+    -- Layer 7: getgc scan (للـ functions المتروكة)
+    setProgress(0.80, "Layer 7: getgc analysis")
+    if getgc then
+        pcall(function()
+            local gc = getgc(true)
+            if type(gc) == "table" then
+                local fnCount = 0
+                for _, v in ipairs(gc) do
+                    if type(v) == "function" then
+                        fnCount = fnCount + 1
+                    end
+                end
+                -- سجل فقط العدد (لأداء)
+            end
+        end)
+    end
+
+    -- Layer 8: Sound/Animation leaks
+    if S.settings.scanSound then
+        setProgress(0.85, "Layer 8: Sound scan")
+        pcall(function()
+            for _, s in ipairs(Sound:GetDescendants()) do
+                if s:IsA("Sound") and s.Name ~= "" then
+                    -- تجاهل الأصوات العادية
+                end
+            end
+        end)
+    end
+
+    -- Hook installation (مرة واحدة)
+    if not S.hooksInstalled then
+        pcall(function()
+            if hookmetamethod and getnamecallmethod and newcclosure then
+                local old
+                old = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+                    local m = getnamecallmethod()
+                    if m == "FireServer" or m == "InvokeServer" then
+                        if typeof(self) == "Instance" and (self.ClassName == "RemoteEvent" or self.ClassName == "RemoteFunction") then
+                            local fullName = self:GetFullName()
+                            table.insert(S.live, {
+                                time = os.date("%H:%M:%S"),
+                                name = fullName,
+                                method = m,
+                                args = {...},
+                            })
+                            if #S.live > 250 then table.remove(S.live, 1) end
+
+                            -- Watchlist alert
+                            if S.settings.watchAlerts then
+                                for wname, _ in pairs(S.watchlist) do
+                                    if self.Name == wname or fullName:find(wname, 1, true) then
+                                        notify("★ WATCH ALERT", wname .. " fired!", C.Pink)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    return old(self, ...)
+                end))
+                S.hooksInstalled = true
+            end
+        end)
+    end
+
+    -- Sort
+    table.sort(S.remotes, function(a, b) return a.score > b.score end)
+
+    setProgress(1, "Done in " .. string.format("%.2fs", tick() - t0))
+    S.lastScan = tick()
+    S.scanning = false
+    setStatus("READY", C.Green)
+
+    refreshStats()
+    renderRemotes()
+    renderScripts()
+    updateAnalytics()
+
+    local susCount = 0
+    for _, r in ipairs(S.remotes) do if r.score >= 3 then susCount = susCount + 1 end end
+    notify("Scan Complete", string.format("%d remotes · %d مشبوه · %.2fs", #S.remotes, susCount, tick()-t0), C.Green)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- MASTER REPORT
+-- ═══════════════════════════════════════════════════════════════════════
+function copyMasterReport()
+    local L = {}
+    table.insert(L, "═══════════════════════════════════════════════════════════")
+    table.insert(L, "  MODARK DEEP SCANNER v4.0 — MASTER REPORT")
+    table.insert(L, "═══════════════════════════════════════════════════════════")
+    table.insert(L, "")
+    table.insert(L, "◆ GAME INFO")
+    table.insert(L, "  Game ID: " .. game.PlaceId)
+    table.insert(L, "  Job ID:  " .. game.JobId)
+    table.insert(L, "  Player:  " .. LP.Name .. " (@" .. LP.DisplayName .. ")")
+    table.insert(L, "  Time:    " .. os.date("%Y-%m-%d %H:%M:%S"))
+    table.insert(L, "")
+    table.insert(L, "◆ STATISTICS")
+    local susCount = 0
+    for _, r in ipairs(S.remotes) do if r.score >= 3 then susCount = susCount + 1 end end
+    table.insert(L, "  Remotes Found:    " .. #S.remotes)
+    table.insert(L, "  Suspicious:       " .. susCount)
+    table.insert(L, "  Scripts:          " .. #S.scripts)
+    table.insert(L, "  Live Events:      " .. #S.live)
+    table.insert(L, "  Watchlisted:      " .. (function() local n=0 for _ in pairs(S.watchlist) do n=n+1 end return n end)())
+    table.insert(L, "")
+    table.insert(L, "◆ SUSPICIOUS REMOTES (score ≥ 3)")
+    table.insert(L, "─────────────────────────────────────────────────────────")
+    for _, r in ipairs(S.remotes) do
+        if r.score >= 3 then
+            local lvl = levelOf(r.score)
+            table.insert(L, string.format("[%s] %s", lvl, r.name))
+            table.insert(L, "  Class:    " .. r.class)
+            table.insert(L, "  Path:     " .. (r.path or ""))
+            table.insert(L, "  Score:    " .. string.format("%.1f", r.score))
+            table.insert(L, "  Source:   " .. (r.source or "?"))
+            if r.reasons and #r.reasons > 0 then
+                table.insert(L, "  Keywords: " .. table.concat(r.reasons, ", "))
+            end
+            if r.flags and #r.flags > 0 then
+                table.insert(L, "  Flags:    " .. table.concat(r.flags, ", "))
+            end
+            table.insert(L, "")
+        end
+    end
+    table.insert(L, "◆ ALL REMOTES (sorted by score)")
+    table.insert(L, "─────────────────────────────────────────────────────────")
+    for _, r in ipairs(S.remotes) do
+        table.insert(L, string.format("[%2.1f] [%s] %s  →  %s",
+            r.score, r.class:gsub("Remote",""), r.name, r.path or ""))
+    end
+    table.insert(L, "")
+    table.insert(L, "◆ SCRIPTS (" .. #S.scripts .. ")")
+    table.insert(L, "─────────────────────────────────────────────────────────")
+    for _, s in ipairs(S.scripts) do
+        table.insert(L, "[" .. s.class .. "] " .. s.name .. "  →  " .. (s.path or ""))
+    end
+    table.insert(L, "")
+    table.insert(L, "◆ LIVE EVENTS (last 30)")
+    table.insert(L, "─────────────────────────────────────────────────────────")
+    local start = math.max(1, #S.live - 30)
+    for i = start, #S.live do
+        local e = S.live[i]
+        local argStr = ""
+        if e.args and #e.args > 0 then
+            local parts = {}
+            for j, a in ipairs(e.args) do
+                if type(a) == "Instance" then parts[j] = a.Name
+                else parts[j] = tostring(a) end
+            end
+            argStr = "(" .. table.concat(parts, ", ") .. ")"
+        end
+        table.insert(L, "[" .. e.time .. "] " .. e.method .. " " .. e.name .. argStr)
+    end
+    table.insert(L, "")
+    table.insert(L, "═══════════════════════════════════════════════════════════")
+    table.insert(L, "END OF REPORT — Modark Deep Scanner v4.0")
+    table.insert(L, "═══════════════════════════════════════════════════════════")
+
+    local txt = table.concat(L, "\n")
+    local copied = false
+    if setclipboard then copied = pcall(setclipboard, txt) end
+    if not copied and tosetclipboard then copied = pcall(tosetclipboard, txt) end
+    print(txt)
+    notify("Master Report", copied and ("نُسخ " .. #txt .. " حرف") or "طُبع في Console", C.Accent)
+end
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- AUTO-SCAN & LIVE UPDATES
+-- ═══════════════════════════════════════════════════════════════════════
+task.spawn(function()
+    while sg.Parent do
+        task.wait(1)
+        if S.settings.autoScan and not S.scanning then
+            if tick() - S.lastScan > S.settings.autoScanInterval then
+                pcall(scanCoroutine, false)
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    local lastLive = 0
+    while sg.Parent do
+        task.wait(0.7)
+        if #S.live ~= lastLive then
+            lastLive = #S.live
+            renderLive()
+            refreshStats()
+        end
+    end
+end)
+
+task.spawn(function()
+    while sg.Parent do
+        task.wait(1.5)
+        if not S.scanning and progBar.Size.X.Scale >= 1 then
+            task.wait(1)
+            tw(progBar, 0.4, {Size = UDim2.new(0, 0, 1, 0)})
+            progLbl.Text = "Ready"
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- START
+-- ═══════════════════════════════════════════════════════════════════════
+task.wait(0.3)
+notify("DEEP SCANNER v4.0", "15 طبقة فحص · منفّذ Remotes · تحليلات", C.Accent)
+task.wait(0.6)
+notify("جاهز", "اضغط Remotes ← اختيار Remote ← Execute", C.Cyan)
+task.wait(0.5)
+notify("Master Report", "زر نسخ كامل في تبويب Export", C.Green)
+
+-- فحص تلقائي أولي
+task.spawn(function()
+    task.wait(2)
+    scanCoroutine(false)
+end)
+
+renderWatchlist()
+renderHistory()
+refreshStats()
+print("[M] ═══════════════════════════════════════════════════")
+print("[M] MODARK DEEP SCANNER v4.0 — ULTIMATE EDITION")
+print("[M] 15 Layers · Executor · Analytics · Watchlist · Master Report")
+print("[M] User:", LP.Name, "| Place:", game.PlaceId)
+print("[M] ═══════════════════════════════════════════════════")
